@@ -1,67 +1,75 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { DailyTask, TaskWriteResult } from '../types';
 import {
-  dbGetTodayTasks,
-  dbCreateTask,
-  dbCarryForwardTask,
-  dbCompleteTask,
-  dbUncompleteTask,
-  dbDropTask,
-} from '../db';
+  carryForwardTask as apiCarryForwardTask,
+  completeTask as apiCompleteTask,
+  createTask,
+  dropTask as apiDropTask,
+  getTodayTasks,
+  subscribeToDataChanges,
+  uncompleteTask as apiUncompleteTask,
+} from '../api/client';
 
 export function useTodayTasks(goalId: string | null) {
   const [tasks, setTasks] = useState<DailyTask[]>([]);
 
-  const refresh = useCallback(() => {
-    setTasks(dbGetTodayTasks());
+  const refresh = useCallback(async () => {
+    setTasks(await getTodayTasks());
   }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
+  useEffect(() => subscribeToDataChanges(() => void refresh()), [refresh]);
+
   const addTask = useCallback(
-    (title: string, weeklyFocusId?: string | null): TaskWriteResult => {
+    async (title: string, weeklyFocusId?: string | null, nextStep?: string): Promise<TaskWriteResult> => {
       if (!goalId) {
         return { ok: false, reason: 'missing_goal' };
       }
 
-      const result = dbCreateTask(title, goalId, weeklyFocusId);
-      refresh();
+      const result = await createTask({
+        title,
+        goalId,
+        weeklyFocusId,
+        nextStep,
+      });
+      await refresh();
       return result;
     },
     [goalId, refresh]
   );
 
   const carryForwardTask = useCallback(
-    (taskId: string): TaskWriteResult => {
-      const result = dbCarryForwardTask(taskId);
-      refresh();
+    async (taskId: string): Promise<TaskWriteResult> => {
+      const result = await apiCarryForwardTask(taskId);
+      await refresh();
       return result;
     },
     [refresh]
   );
 
   const completeTask = useCallback(
-    (id: string) => {
-      dbCompleteTask(id);
-      refresh();
+    async (id: string) => {
+      await apiCompleteTask(id);
+      await refresh();
     },
     [refresh]
   );
 
   const uncompleteTask = useCallback(
-    (id: string) => {
-      dbUncompleteTask(id);
-      refresh();
+    async (id: string) => {
+      await apiUncompleteTask(id);
+      await refresh();
     },
     [refresh]
   );
 
   const dropTask = useCallback(
-    (id: string) => {
-      dbDropTask(id);
-      refresh();
+    async (id: string) => {
+      await apiDropTask(id);
+      await refresh();
     },
     [refresh]
   );

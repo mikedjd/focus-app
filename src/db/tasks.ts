@@ -13,6 +13,7 @@ type DailyTaskRow = {
   weekly_focus_id: string | null;
   source_task_id: string | null;
   title: string;
+  next_step: string;
   date: string;
   status: string;
   completed_at: number | null;
@@ -27,6 +28,7 @@ function mapTask(row: DailyTaskRow): DailyTask {
     weeklyFocusId: row.weekly_focus_id,
     sourceTaskId: row.source_task_id,
     title: row.title,
+    nextStep: row.next_step || '',
     date: row.date,
     status: row.status as DailyTask['status'],
     completedAt: row.completed_at,
@@ -61,7 +63,7 @@ export function dbCreateTask(
   title: string,
   goalId: string,
   weeklyFocusId?: string | null,
-  options?: { date?: string; sourceTaskId?: string | null }
+  options?: { date?: string; sourceTaskId?: string | null; nextStep?: string }
 ): TaskWriteResult {
   return runDb('create task', { ok: false, reason: 'db_error' } as TaskWriteResult, (db) => {
     if (!goalId) {
@@ -79,6 +81,7 @@ export function dbCreateTask(
       weeklyFocusId: weeklyFocusId ?? null,
       sourceTaskId: options?.sourceTaskId ?? null,
       title,
+      nextStep: options?.nextStep?.trim() ?? '',
       date: targetDate,
       status: 'pending',
       completedAt: null,
@@ -118,6 +121,7 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
         weeklyFocusId: sourceRow.weekly_focus_id,
         sourceTaskId: hasColumn(db, 'daily_tasks', 'source_task_id') ? sourceRow.id : null,
         title: sourceRow.title,
+        nextStep: sourceRow.next_step || '',
         date: targetDate,
         status: 'pending',
         completedAt: null,
@@ -177,6 +181,9 @@ function getTaskSelectClause(db: SQLite.SQLiteDatabase): string {
   const sourceTaskSelect = hasColumn(db, 'daily_tasks', 'source_task_id')
     ? 'source_task_id'
     : 'NULL AS source_task_id';
+  const nextStepSelect = hasColumn(db, 'daily_tasks', 'next_step')
+    ? 'next_step'
+    : "'' AS next_step";
   const createdAtSelect = hasColumn(db, 'daily_tasks', 'created_at')
     ? 'created_at'
     : '0 AS created_at';
@@ -188,6 +195,7 @@ function getTaskSelectClause(db: SQLite.SQLiteDatabase): string {
       weekly_focus_id,
       ${sourceTaskSelect},
       title,
+      ${nextStepSelect},
       date,
       status,
       completed_at,
@@ -201,12 +209,13 @@ function insertTaskRow(db: SQLite.SQLiteDatabase, task: DailyTask): void {
   const supportsSourceTaskId = hasColumn(db, 'daily_tasks', 'source_task_id');
   const supportsCreatedAt = hasColumn(db, 'daily_tasks', 'created_at');
 
-  const columns = ['id', 'goal_id', 'weekly_focus_id', 'title', 'date', 'status', 'completed_at', 'sort_order'];
+  const columns = ['id', 'goal_id', 'weekly_focus_id', 'title', 'next_step', 'date', 'status', 'completed_at', 'sort_order'];
   const values: Array<string | number | null> = [
     task.id,
     task.goalId,
     task.weeklyFocusId,
     task.title,
+    task.nextStep,
     task.date,
     task.status,
     task.completedAt,

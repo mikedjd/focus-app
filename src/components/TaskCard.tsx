@@ -118,6 +118,11 @@ export function TaskCard({ task, isNextUp = false, onToggle, onFocus, onDrop }: 
           <Text style={[styles.title, done && styles.titleDone]} numberOfLines={2}>
             {task.title}
           </Text>
+          {task.nextStep ? (
+            <Text style={[styles.nextStep, done && styles.titleDone]} numberOfLines={2}>
+              Next: {task.nextStep}
+            </Text>
+          ) : null}
         </TouchableOpacity>
       </Animated.View>
     </View>
@@ -210,6 +215,12 @@ const styles = StyleSheet.create({
     color: C.text,
     lineHeight: 22,
     letterSpacing: -0.2,
+  },
+  nextStep: {
+    marginTop: 4,
+    fontSize: 13,
+    color: C.textSecondary,
+    lineHeight: 18,
   },
   titleDone: {
     color: C.textMuted,

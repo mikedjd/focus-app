@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { dbDismissResumeContext, dbIsReviewDue, dbRefreshResumeContext } from '../../src/db';
+import { dismissResumeContext, isReviewDue, refreshResumeContext } from '../../src/api/client';
 import { AddTaskSheet } from '../../src/components/today/AddTaskSheet';
 import { GoalAnchorCard } from '../../src/components/today/GoalAnchorCard';
 import { NextUpPrompt } from '../../src/components/today/NextUpPrompt';
@@ -14,6 +14,7 @@ import { useGoals } from '../../src/hooks/useGoals';
 import { useTodayTasks } from '../../src/hooks/useTodayTasks';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatDisplayDate } from '../../src/utils/dates';
+import type { ResumeContext } from '../../src/types';
 
 export default function TodayScreen() {
   const router = useRouter();
@@ -40,10 +41,12 @@ export default function TodayScreen() {
   const [promptDismissed, setPromptDismissed] = useState(false);
 
   const refreshScreen = useCallback(() => {
-    refreshGoals();
-    refreshTasks();
-    setResumeContext(dbRefreshResumeContext());
-    setReviewDue(dbIsReviewDue());
+    void refreshGoals();
+    void refreshTasks();
+    void (async () => {
+      setResumeContext(await refreshResumeContext());
+      setReviewDue(await isReviewDue());
+    })();
   }, [refreshGoals, refreshTasks, setResumeContext, setReviewDue]);
 
   useFocusEffect(
@@ -59,11 +62,11 @@ export default function TodayScreen() {
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
       if (task.status === 'done') {
-        uncompleteTask(taskId);
+        void uncompleteTask(taskId);
         return;
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      completeTask(taskId);
+      void completeTask(taskId);
     },
     [tasks, completeTask, uncompleteTask]
   );
@@ -78,34 +81,44 @@ export default function TodayScreen() {
 
   const handleDrop = useCallback(
     (taskId: string) => {
-      dropTask(taskId);
+      void dropTask(taskId);
     },
     [dropTask]
   );
 
   const handleAddTask = useCallback(
-    (title: string) => {
+    async (title: string, nextStep?: string) => {
       setResumeError(null);
-      return addTask(title, weeklyFocus?.id ?? null);
+      return addTask(title, weeklyFocus?.id ?? null, nextStep);
     },
     [addTask, weeklyFocus?.id]
   );
 
   const handleDismissResume = useCallback(
-    (taskId: string) => {
-      dbDismissResumeContext(taskId);
-      setResumeError(null);
-      setResumeContext(null);
+    (context: ResumeContext) => {
+      void (async () => {
+        await dismissResumeContext(context);
+        setResumeError(null);
+        setResumeContext(null);
+      })();
     },
     [setResumeContext]
   );
 
-  const handleCarryForward = useCallback(
-    (taskId: string) => {
-      const result = carryForwardTask(taskId);
+  const handleResumePrimaryAction = useCallback(
+    (context: ResumeContext) => {
+      void (async () => {
+      if (context.kind === 'focus-session') {
+        setPromptDismissed(true);
+        setResumeError(null);
+        router.push(`/focus?taskId=${context.taskId}&sessionId=${context.focusSessionId}`);
+        return;
+      }
+
+      const result = await carryForwardTask(context.taskId);
       if (result.ok) {
         setResumeError(null);
-        setResumeContext(dbRefreshResumeContext());
+        setResumeContext(await refreshResumeContext());
         return;
       }
       if (result.reason === 'task_limit_reached') {
@@ -113,8 +126,9 @@ export default function TodayScreen() {
         return;
       }
       setResumeError('That task could not be carried forward right now.');
+      })();
     },
-    [carryForwardTask, setResumeContext]
+    [carryForwardTask, router, setResumeContext]
   );
 
   // Show prompt only when: goal set, tasks exist, first task is pending, not dismissed
@@ -140,7 +154,7 @@ export default function TodayScreen() {
         {resumeContext ? (
           <ResumeContextBanner
             resumeContext={resumeContext}
-            onCarryForward={handleCarryForward}
+            onPrimaryAction={handleResumePrimaryAction}
             onDismiss={handleDismissResume}
             errorMessage={resumeError}
           />

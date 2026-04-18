@@ -1,48 +1,188 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { dbGetTaskById, dbGetActiveGoal, dbCompleteTask } from '../src/db';
-import type { DailyTask, Goal } from '../src/types';
+import {
+  abandonFocusSession,
+  completeFocusSession,
+  completeTask,
+  getActiveGoal,
+  getFocusSessionById,
+  getTaskById,
+  removeContext,
+  sendRpcBeacon,
+  startFocusSession,
+  touchFocusSession,
+} from '../src/api/client';
+import { BottomSheetModal } from '../src/components/BottomSheetModal';
 import { C } from '../src/constants/colors';
+import type { FocusExitReason, FocusSession, DailyTask, Goal } from '../src/types';
 import { formatElapsed } from '../src/utils/dates';
 
 const BG = '#12121A';
 const TEXT_DIM = 'rgba(255,255,255,0.45)';
-const TEXT_MID = 'rgba(255,255,255,0.65)';
+const TEXT_MID = 'rgba(255,255,255,0.7)';
+const HEARTBEAT_INTERVAL_MS = 15000;
+
+const EXIT_REASONS: Array<{ id: Exclude<FocusExitReason, 'switched_task'>; label: string }> = [
+  { id: 'distraction', label: 'Distraction' },
+  { id: 'task_unclear', label: 'Task unclear' },
+  { id: 'too_tired', label: 'Too tired' },
+  { id: 'interrupted', label: 'Interrupted' },
+  { id: 'avoided_it', label: 'Avoided it' },
+];
 
 export default function FocusScreen() {
-  const { taskId } = useLocalSearchParams<{ taskId: string }>();
+  const { taskId, sessionId } = useLocalSearchParams<{ taskId: string; sessionId?: string }>();
   const router = useRouter();
 
   const [task, setTask] = useState<DailyTask | null>(null);
   const [goal, setGoal] = useState<Goal | null>(null);
+  const [session, setSession] = useState<FocusSession | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [done, setDone] = useState(false);
+  const [showExitSheet, setShowExitSheet] = useState(false);
+  const [selectedExitReason, setSelectedExitReason] = useState<
+    Exclude<FocusExitReason, 'switched_task'> | null
+  >(null);
+  const [allowLeave, setAllowLeave] = useState(false);
+
+  const refreshFocusState = useCallback(() => {
+    if (!taskId) return;
+
+    void (async () => {
+      const [nextTask, nextGoal] = await Promise.all([getTaskById(taskId), getActiveGoal()]);
+      setTask(nextTask);
+      setGoal(nextGoal);
+      setDone(nextTask?.status === 'done');
+
+      if (!nextTask || nextTask.status === 'done') {
+        setSession(null);
+        return;
+      }
+
+      const requestedSession = sessionId ? await getFocusSessionById(sessionId) : null;
+      await removeContext('dismissed_resume_task_id');
+      const activeSession =
+        requestedSession && requestedSession.status === 'active' && requestedSession.taskId === taskId
+          ? requestedSession
+          : await startFocusSession(taskId);
+
+      setSession(activeSession);
+      if (activeSession) {
+        setElapsed(Math.max(0, Math.floor((Date.now() - activeSession.startedAt) / 1000)));
+      }
+    })();
+  }, [sessionId, taskId]);
 
   useEffect(() => {
-    if (taskId) {
-      const t = dbGetTaskById(taskId);
-      setTask(t);
-      setDone(t?.status === 'done');
-      setGoal(dbGetActiveGoal());
+    refreshFocusState();
+  }, [refreshFocusState]);
+
+  useEffect(() => {
+    if (!session || session.status !== 'active' || done) {
+      return;
     }
-  }, [taskId]);
+
+    setElapsed(Math.max(0, Math.floor((Date.now() - session.startedAt) / 1000)));
+
+    const interval = setInterval(() => {
+      setElapsed(Math.max(0, Math.floor((Date.now() - session.startedAt) / 1000)));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [done, session]);
 
   useEffect(() => {
-    if (done) return;
-    const interval = setInterval(() => setElapsed((e) => e + 1), 1000);
+    if (!session || session.status !== 'active' || done) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      void touchFocusSession(session.id);
+    }, HEARTBEAT_INTERVAL_MS);
+
     return () => clearInterval(interval);
-  }, [done]);
+  }, [done, session]);
+
+  const helperText = useMemo(() => {
+    if (!task) {
+      return '';
+    }
+
+    if (task.nextStep) {
+      return task.nextStep;
+    }
+
+    return task.sourceTaskId
+      ? 'Return to the next concrete move on this task. Stay here until you can finish or exit intentionally.'
+      : 'Stay on this one task until you can finish it or choose to exit intentionally.';
+  }, [task]);
 
   const handleDone = useCallback(() => {
-    if (!taskId) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    dbCompleteTask(taskId);
-    setDone(true);
-    setTimeout(() => router.back(), 900);
-  }, [taskId, router]);
+    if (!taskId || !session) {
+      return;
+    }
+
+    void (async () => {
+      setAllowLeave(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const completedSession = await completeFocusSession(session.id);
+      await completeTask(taskId);
+      setSession(completedSession);
+      setElapsed(completedSession?.durationSeconds ?? elapsed);
+      setDone(true);
+      setTimeout(() => router.replace('/(tabs)'), 900);
+    })();
+  }, [elapsed, router, session, taskId]);
+
+  const handleRequestExit = useCallback(() => {
+    setSelectedExitReason(null);
+    setShowExitSheet(true);
+  }, []);
+
+  const handleExitEarly = useCallback(() => {
+    if (!session || !selectedExitReason) {
+      return;
+    }
+
+    void (async () => {
+      setAllowLeave(true);
+      await abandonFocusSession(session.id, selectedExitReason);
+      setShowExitSheet(false);
+      router.replace('/(tabs)');
+    })();
+  }, [router, selectedExitReason, session]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !session || session.status !== 'active' || done) {
+      return;
+    }
+
+    const handleBeforeUnload = () => {
+      sendRpcBeacon('touchFocusSession', { id: session.id });
+    };
+
+    const handlePopState = () => {
+      if (allowLeave) {
+        return;
+      }
+
+      window.history.pushState({ focusGuard: true }, '', window.location.href);
+      setSelectedExitReason(null);
+      setShowExitSheet(true);
+    };
+
+    window.history.pushState({ focusGuard: true }, '', window.location.href);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [allowLeave, done, session]);
 
   if (!task) {
     return (
@@ -59,50 +199,34 @@ export default function FocusScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      {/* ── Top bar ─────────────────────────────────── */}
       <View style={styles.topBar}>
-        {!done && (
-          <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()}>
+        {!done ? (
+          <TouchableOpacity style={styles.closeBtn} onPress={handleRequestExit}>
             <Text style={styles.closeBtnText}>✕</Text>
           </TouchableOpacity>
+        ) : (
+          <View style={styles.closeSpacer} />
         )}
         <View style={styles.topBarSpacer} />
-        {!done && (
-          <Text style={styles.timer}>{formatElapsed(elapsed)}</Text>
-        )}
+        <Text style={styles.timer}>{formatElapsed(elapsed)}</Text>
       </View>
 
-      {/* ── Main content ────────────────────────────── */}
       <View style={styles.content}>
         {done ? (
-          /* Done state */
           <View style={styles.doneContainer}>
             <View style={styles.doneCircle}>
               <Text style={styles.doneCheckmark}>✓</Text>
             </View>
             <Text style={styles.doneTitle}>Done.</Text>
             <Text style={styles.doneElapsed}>{formatElapsed(elapsed)}</Text>
-            {goal ? (
-              <Text style={styles.doneGoal}>
-                One step closer to: {goal.title}
-              </Text>
-            ) : null}
+            {goal ? <Text style={styles.doneGoal}>One step closer to: {goal.title}</Text> : null}
           </View>
         ) : (
           <>
-            {/* Why anchor — shown first, above the task, so it sets context */}
-            {goal?.why ? (
-              <View style={styles.whyAnchor}>
-                <Text style={styles.whyAnchorLabel}>WHY THIS MATTERS</Text>
-                <Text style={styles.whyAnchorText}>"{goal.why}"</Text>
-              </View>
-            ) : null}
-
-            {/* Task */}
-            <Text style={styles.focusLabel}>NOW</Text>
+            <Text style={styles.focusLabel}>Focus</Text>
             <Text style={styles.taskTitle}>{task.title}</Text>
+            <Text style={styles.helperText}>{helperText}</Text>
 
-            {/* Goal link */}
             {goal ? (
               <View style={styles.goalLink}>
                 <Text style={styles.goalLinkArrow}>↑</Text>
@@ -115,28 +239,85 @@ export default function FocusScreen() {
         )}
       </View>
 
-      {/* ── Bottom action ───────────────────────────── */}
-      {!done && (
+      {!done ? (
         <View style={styles.bottomBar}>
-          <TouchableOpacity
-            style={styles.doneButton}
-            onPress={handleDone}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.doneButtonText}>Mark Done</Text>
+          <TouchableOpacity style={styles.doneButton} onPress={handleDone} activeOpacity={0.85}>
+            <Text style={styles.doneButtonText}>Complete task</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backButtonText}>Back to Today</Text>
+          <TouchableOpacity style={styles.backButton} onPress={handleRequestExit}>
+            <Text style={styles.backButtonText}>Exit early</Text>
           </TouchableOpacity>
         </View>
-      )}
+      ) : null}
+
+      <BottomSheetModal visible={showExitSheet} onClose={() => setShowExitSheet(false)}>
+        <Text style={styles.sheetTitle}>Exit early?</Text>
+        <Text style={styles.sheetSubtitle}>
+          Pick the reason that fits best so the app can help you resume clearly later.
+        </Text>
+
+        {goal?.anchorWhy ? (
+          <View style={styles.anchorBlock}>
+            <Text style={styles.anchorLabel}>Why this matters</Text>
+            <Text style={styles.anchorText}>{goal.anchorWhy}</Text>
+          </View>
+        ) : null}
+
+        {goal?.anchorDrift ? (
+          <View style={styles.anchorBlock}>
+            <Text style={styles.anchorLabel}>Cost of drift</Text>
+            <Text style={styles.anchorText}>{goal.anchorDrift}</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.reasonGrid}>
+          {EXIT_REASONS.map((reason) => {
+            const selected = selectedExitReason === reason.id;
+            return (
+              <TouchableOpacity
+                key={reason.id}
+                style={[styles.reasonChip, selected && styles.reasonChipActive]}
+                onPress={() => setSelectedExitReason(reason.id)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.reasonChipText, selected && styles.reasonChipTextActive]}>
+                  {reason.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <View style={styles.sheetActions}>
+          <TouchableOpacity
+            style={styles.sheetSecondaryButton}
+            onPress={() => setShowExitSheet(false)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.sheetSecondaryText}>Keep going</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.sheetPrimaryButton,
+              !selectedExitReason && styles.sheetPrimaryButtonDisabled,
+            ]}
+            onPress={handleExitEarly}
+            disabled={!selectedExitReason}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.sheetPrimaryText}>Exit focus</Text>
+          </TouchableOpacity>
+        </View>
+      </BottomSheetModal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: BG },
-
+  safe: {
+    flex: 1,
+    backgroundColor: BG,
+  },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -152,50 +333,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  closeBtnText: { color: 'rgba(255,255,255,0.5)', fontSize: 16 },
-  topBarSpacer: { flex: 1 },
+  closeSpacer: {
+    width: 36,
+    height: 36,
+  },
+  closeBtnText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 16,
+  },
+  topBarSpacer: {
+    flex: 1,
+  },
   timer: {
     fontSize: 15,
     color: 'rgba(255,255,255,0.35)',
     fontVariant: ['tabular-nums'],
     letterSpacing: 1,
   },
-
   content: {
     flex: 1,
     paddingHorizontal: 28,
-    paddingTop: 32,
-    justifyContent: 'flex-start',
+    paddingTop: 40,
   },
-
-  // Why anchor — appears at top to frame the task
-  whyAnchor: {
-    borderLeftWidth: 2,
-    borderLeftColor: C.accent,
-    paddingLeft: 14,
-    marginBottom: 36,
-  },
-  whyAnchorLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: C.accent,
-    letterSpacing: 1.5,
-    marginBottom: 6,
-  },
-  whyAnchorText: {
-    fontSize: 15,
-    color: TEXT_MID,
-    fontStyle: 'italic',
-    lineHeight: 22,
-  },
-
-  // Task block
   focusLabel: {
     fontSize: 11,
     fontWeight: '700',
     color: C.accent,
     letterSpacing: 2,
-    marginBottom: 12,
+    marginBottom: 14,
+    textTransform: 'uppercase',
   },
   taskTitle: {
     fontSize: 30,
@@ -203,25 +369,66 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     lineHeight: 40,
     letterSpacing: -0.5,
-    marginBottom: 24,
+    marginBottom: 18,
   },
-
-  // Goal link
+  helperText: {
+    fontSize: 15,
+    color: TEXT_MID,
+    lineHeight: 24,
+    marginBottom: 22,
+  },
   goalLink: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  goalLinkArrow: { fontSize: 16, color: TEXT_DIM },
+  goalLinkArrow: {
+    fontSize: 16,
+    color: TEXT_DIM,
+  },
   goalLinkText: {
     fontSize: 14,
     color: TEXT_DIM,
     flex: 1,
     lineHeight: 20,
   },
-
-  // Done state
-  doneContainer: { alignItems: 'center', paddingTop: 48 },
+  bottomBar: {
+    paddingHorizontal: 24,
+    paddingBottom: 32,
+    gap: 10,
+  },
+  doneButton: {
+    backgroundColor: C.accent,
+    borderRadius: 16,
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  doneButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  backButton: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  backButtonText: {
+    fontSize: 15,
+    color: TEXT_DIM,
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorText: {
+    color: TEXT_DIM,
+    fontSize: 16,
+  },
+  doneContainer: {
+    alignItems: 'center',
+    paddingTop: 48,
+  },
   doneCircle: {
     width: 80,
     height: 80,
@@ -231,7 +438,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 24,
   },
-  doneCheckmark: { fontSize: 36, color: '#fff' },
+  doneCheckmark: {
+    fontSize: 36,
+    color: '#fff',
+  },
   doneTitle: {
     fontSize: 36,
     fontWeight: '700',
@@ -252,26 +462,94 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     paddingHorizontal: 24,
   },
-
-  // Bottom
-  bottomBar: {
-    paddingHorizontal: 24,
-    paddingBottom: 32,
+  sheetTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: C.text,
+    marginBottom: 6,
+  },
+  sheetSubtitle: {
+    fontSize: 14,
+    color: C.textSecondary,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  anchorBlock: {
+    borderRadius: 12,
+    backgroundColor: C.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 14,
+    marginBottom: 12,
+  },
+  anchorLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.accent,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 6,
+  },
+  anchorText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: C.text,
+  },
+  reasonGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
+    marginBottom: 18,
   },
-  doneButton: {
-    backgroundColor: C.accent,
-    borderRadius: 16,
-    paddingVertical: 18,
-    alignItems: 'center',
+  reasonChip: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: C.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: C.border,
   },
-  doneButtonText: { fontSize: 18, fontWeight: '700', color: '#fff' },
-  backButton: {
+  reasonChipActive: {
+    backgroundColor: C.accentLight,
+    borderColor: C.accent,
+  },
+  reasonChipText: {
+    fontSize: 14,
+    color: C.textSecondary,
+    fontWeight: '600',
+  },
+  reasonChipTextActive: {
+    color: C.accent,
+  },
+  sheetActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  sheetSecondaryButton: {
+    flex: 1,
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
+    backgroundColor: C.surfaceSecondary,
   },
-  backButtonText: { fontSize: 15, color: TEXT_DIM },
-
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  errorText: { color: TEXT_DIM, fontSize: 16 },
+  sheetSecondaryText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: C.textSecondary,
+  },
+  sheetPrimaryButton: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: C.accent,
+  },
+  sheetPrimaryButtonDisabled: {
+    opacity: 0.4,
+  },
+  sheetPrimaryText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
 });

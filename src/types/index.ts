@@ -1,5 +1,13 @@
 export type GoalStatus = 'active' | 'completed' | 'archived';
 export type TaskStatus = 'pending' | 'done' | 'dropped';
+export type FocusSessionStatus = 'active' | 'completed' | 'abandoned';
+export type FocusExitReason =
+  | 'distraction'
+  | 'task_unclear'
+  | 'too_tired'
+  | 'interrupted'
+  | 'avoided_it'
+  | 'switched_task';
 
 export interface GoalWriteInput {
   title: string;
@@ -44,11 +52,23 @@ export interface DailyTask {
   weeklyFocusId: string | null;
   sourceTaskId: string | null;
   title: string;
+  nextStep: string;
   date: string; // YYYY-MM-DD
   status: TaskStatus;
   completedAt: number | null;
   sortOrder: number;
   createdAt: number;
+}
+
+export interface FocusSession {
+  id: string;
+  taskId: string;
+  startedAt: number;
+  endedAt: number | null;
+  durationSeconds: number;
+  status: FocusSessionStatus;
+  exitReason: FocusExitReason | null;
+  lastHeartbeatAt: number;
 }
 
 export interface WeeklyReview {
@@ -61,13 +81,29 @@ export interface WeeklyReview {
   nextWeekAdjustment: string;
 }
 
-export interface ResumeContext {
+export interface CarryForwardResumeContext {
+  kind: 'carry-forward';
   taskId: string;
   taskTitle: string;
   fromDate: string; // YYYY-MM-DD
   goalId: string;
   weeklyFocusId: string | null;
 }
+
+export interface FocusSessionResumeContext {
+  kind: 'focus-session';
+  taskId: string;
+  taskTitle: string;
+  goalId: string;
+  weeklyFocusId: string | null;
+  focusSessionId: string;
+  startedAt: number;
+  lastHeartbeatAt: number;
+  sessionStatus: Extract<FocusSessionStatus, 'active' | 'abandoned'>;
+  exitReason: FocusExitReason | null;
+}
+
+export type ResumeContext = CarryForwardResumeContext | FocusSessionResumeContext;
 
 export interface OnboardingDraft {
   goalTitle: string;

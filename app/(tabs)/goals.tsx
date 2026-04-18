@@ -6,8 +6,8 @@ import { CreateGoalSheet } from '../../src/components/goals/CreateGoalSheet';
 import { EditFocusSheet } from '../../src/components/goals/EditFocusSheet';
 import { EditGoalSheet } from '../../src/components/goals/EditGoalSheet';
 import { EditWhySheet } from '../../src/components/goals/EditWhySheet';
+import { isReviewDue } from '../../src/api/client';
 import { C } from '../../src/constants/colors';
-import { dbIsReviewDue } from '../../src/db';
 import { useGoals } from '../../src/hooks/useGoals';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatShortDate } from '../../src/utils/dates';
@@ -35,8 +35,10 @@ export default function GoalsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      refresh();
-      setReviewDue(dbIsReviewDue());
+      void refresh();
+      void (async () => {
+        setReviewDue(await isReviewDue());
+      })();
     }, [refresh, setReviewDue])
   );
 
@@ -47,7 +49,13 @@ export default function GoalsScreen() {
       "This will archive it. You'll need to set a new goal to continue tracking tasks.",
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Complete', style: 'destructive', onPress: () => completeGoal(activeGoal.id) },
+        {
+          text: 'Complete',
+          style: 'destructive',
+          onPress: () => {
+            void completeGoal(activeGoal.id);
+          },
+        },
       ]
     );
   };
@@ -188,13 +196,13 @@ export default function GoalsScreen() {
       <CreateGoalSheet
         visible={activeSheet === 'create'}
         onClose={() => setActiveSheet(null)}
-        onSubmit={createGoal}
+        onSubmit={(input) => void createGoal(input)}
       />
       <EditGoalSheet
         visible={activeSheet === 'editGoal'}
         goal={activeGoal}
         onClose={() => setActiveSheet(null)}
-        onSubmit={updateGoal}
+        onSubmit={(goalId, input) => void updateGoal(goalId, input)}
       />
       <EditWhySheet
         visible={activeSheet === 'editWhy'}
@@ -202,7 +210,7 @@ export default function GoalsScreen() {
         onClose={() => setActiveSheet(null)}
         onSubmit={(goalId, input) => {
           if (!activeGoal || goalId !== activeGoal.id) return;
-          updateGoal(goalId, input);
+          void updateGoal(goalId, input);
         }}
       />
       <EditFocusSheet
@@ -210,7 +218,7 @@ export default function GoalsScreen() {
         goalId={activeGoal?.id}
         currentFocus={weeklyFocus?.focus}
         onClose={() => setActiveSheet(null)}
-        onSubmit={(goalId, focus) => setWeeklyFocusText(goalId, focus)}
+        onSubmit={(goalId, focus) => void setWeeklyFocusText(goalId, focus)}
       />
     </SafeAreaView>
   );

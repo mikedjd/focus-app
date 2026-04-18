@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'focus.db';
 const SCHEMA_VERSION_KEY = 'schema_version';
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 6;
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
@@ -35,6 +35,18 @@ const migrations: Migration[] = [
     version: 4,
     run: (db) => {
       ensureGoalTableShape(db);
+    },
+  },
+  {
+    version: 5,
+    run: (db) => {
+      ensureFocusSessionTableShape(db);
+    },
+  },
+  {
+    version: 6,
+    run: (db) => {
+      ensureTaskInstructionShape(db);
     },
   },
 ];
@@ -108,6 +120,8 @@ function runMigrations(db: SQLite.SQLiteDatabase): void {
   ensureTaskTableShape(db);
   ensureReviewTableShape(db);
   ensureGoalTableShape(db);
+  ensureFocusSessionTableShape(db);
+  ensureTaskInstructionShape(db);
 
   if (getSchemaVersion(db) < CURRENT_SCHEMA_VERSION) {
     setSchemaVersion(db, CURRENT_SCHEMA_VERSION);
@@ -145,7 +159,9 @@ function ensureBaseSchema(db: SQLite.SQLiteDatabase): void {
       id TEXT PRIMARY KEY,
       goal_id TEXT NOT NULL,
       weekly_focus_id TEXT,
+      source_task_id TEXT,
       title TEXT NOT NULL,
+      next_step TEXT NOT NULL DEFAULT '',
       date TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
       completed_at INTEGER,
@@ -161,6 +177,18 @@ function ensureBaseSchema(db: SQLite.SQLiteDatabase): void {
       wins TEXT DEFAULT '',
       what_drifted TEXT DEFAULT '',
       next_week_adjustment TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS focus_sessions (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      duration_seconds INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active',
+      exit_reason TEXT DEFAULT '',
+      last_heartbeat_at INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (task_id) REFERENCES daily_tasks(id)
     );
 
     CREATE TABLE IF NOT EXISTS app_context (
@@ -183,6 +211,12 @@ function ensureTaskTableShape(db: SQLite.SQLiteDatabase): void {
   ensureColumn(
     db,
     'daily_tasks',
+    'next_step',
+    "ALTER TABLE daily_tasks ADD COLUMN next_step TEXT NOT NULL DEFAULT ''"
+  );
+  ensureColumn(
+    db,
+    'daily_tasks',
     'created_at',
     "ALTER TABLE daily_tasks ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0"
   );
@@ -200,6 +234,15 @@ function ensureTaskTableShape(db: SQLite.SQLiteDatabase): void {
     SET created_at = CAST(strftime('%s', date || ' 12:00:00') AS INTEGER) * 1000
     WHERE created_at IS NULL OR created_at = 0
   `);
+}
+
+function ensureTaskInstructionShape(db: SQLite.SQLiteDatabase): void {
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'next_step',
+    "ALTER TABLE daily_tasks ADD COLUMN next_step TEXT NOT NULL DEFAULT ''"
+  );
 }
 
 function ensureReviewTableShape(db: SQLite.SQLiteDatabase): void {
@@ -269,6 +312,41 @@ function ensureGoalTableShape(db: SQLite.SQLiteDatabase): void {
     UPDATE goals
     SET target_outcome = title
     WHERE TRIM(COALESCE(target_outcome, '')) = '';
+  `);
+}
+
+function ensureFocusSessionTableShape(db: SQLite.SQLiteDatabase): void {
+  ensureColumn(
+    db,
+    'focus_sessions',
+    'duration_seconds',
+    "ALTER TABLE focus_sessions ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 0"
+  );
+  ensureColumn(
+    db,
+    'focus_sessions',
+    'exit_reason',
+    "ALTER TABLE focus_sessions ADD COLUMN exit_reason TEXT DEFAULT ''"
+  );
+  ensureColumn(
+    db,
+    'focus_sessions',
+    'last_heartbeat_at',
+    "ALTER TABLE focus_sessions ADD COLUMN last_heartbeat_at INTEGER NOT NULL DEFAULT 0"
+  );
+
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_focus_sessions_task_started
+      ON focus_sessions(task_id, started_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_focus_sessions_status_started
+      ON focus_sessions(status, started_at DESC);
+  `);
+
+  db.runSync(`
+    UPDATE focus_sessions
+    SET last_heartbeat_at = started_at
+    WHERE last_heartbeat_at IS NULL OR last_heartbeat_at = 0
   `);
 }
 

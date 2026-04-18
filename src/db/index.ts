@@ -52,6 +52,19 @@ import {
   dbCompleteOnboarding as nativeCompleteOnboarding,
 } from './onboarding';
 
+import {
+  dbGetFocusSessionById as nativeGetFocusSessionById,
+  dbGetActiveFocusSession as nativeGetActiveFocusSession,
+  dbGetActiveFocusSessionForTask as nativeGetActiveFocusSessionForTask,
+  dbGetMostRecentAbandonedFocusSession as nativeGetMostRecentAbandonedFocusSession,
+  dbStartFocusSession as nativeStartFocusSession,
+  dbTouchFocusSession as nativeTouchFocusSession,
+  dbCompleteFocusSession as nativeCompleteFocusSession,
+  dbAbandonFocusSession as nativeAbandonFocusSession,
+  dbGetFocusSessionsForTask as nativeGetFocusSessionsForTask,
+  dbGetFocusSessionsForWeek as nativeGetFocusSessionsForWeek,
+} from './focusSessions';
+
 const isWeb = Platform.OS === 'web';
 
 // Context
@@ -92,3 +105,15 @@ export const dbGetOnboardingDraft    = isWeb ? webDb.dbGetOnboardingDraft    : n
 export const dbSaveOnboardingDraft   = isWeb ? webDb.dbSaveOnboardingDraft   : nativeSaveOnboardingDraft;
 export const dbClearOnboardingDraft  = isWeb ? webDb.dbClearOnboardingDraft  : nativeClearOnboardingDraft;
 export const dbCompleteOnboarding    = isWeb ? webDb.dbCompleteOnboarding    : nativeCompleteOnboarding;
+
+// Focus sessions
+export const dbGetFocusSessionById             = isWeb ? webDb.dbGetFocusSessionById             : nativeGetFocusSessionById;
+export const dbGetActiveFocusSession           = isWeb ? webDb.dbGetActiveFocusSession           : nativeGetActiveFocusSession;
+export const dbGetActiveFocusSessionForTask    = isWeb ? webDb.dbGetActiveFocusSessionForTask    : nativeGetActiveFocusSessionForTask;
+export const dbGetMostRecentAbandonedFocusSession = isWeb ? webDb.dbGetMostRecentAbandonedFocusSession : nativeGetMostRecentAbandonedFocusSession;
+export const dbStartFocusSession               = isWeb ? webDb.dbStartFocusSession               : nativeStartFocusSession;
+export const dbTouchFocusSession               = isWeb ? webDb.dbTouchFocusSession               : nativeTouchFocusSession;
+export const dbCompleteFocusSession            = isWeb ? webDb.dbCompleteFocusSession            : nativeCompleteFocusSession;
+export const dbAbandonFocusSession             = isWeb ? webDb.dbAbandonFocusSession             : nativeAbandonFocusSession;
+export const dbGetFocusSessionsForTask         = isWeb ? webDb.dbGetFocusSessionsForTask         : nativeGetFocusSessionsForTask;
+export const dbGetFocusSessionsForWeek         = isWeb ? webDb.dbGetFocusSessionsForWeek         : nativeGetFocusSessionsForWeek;

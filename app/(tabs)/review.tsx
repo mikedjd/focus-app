@@ -12,11 +12,11 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { C } from '../../src/constants/colors';
-import { dbIsReviewDue } from '../../src/db';
+import { isReviewDue } from '../../src/api/client';
 import { useGoals } from '../../src/hooks/useGoals';
 import { usePrevWeekStart, useWeeklyReview } from '../../src/hooks/useWeeklyReview';
 import { useAppStore } from '../../src/store/useAppStore';
-import { formatWeekRange } from '../../src/utils/dates';
+import { formatDurationCompact, formatWeekRange } from '../../src/utils/dates';
 
 // ─── Drift reason chips ──────────────────────────────────────────────────────
 
@@ -134,9 +134,11 @@ export default function ReviewScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      refreshGoals();
-      refreshReview();
-      setReviewDue(dbIsReviewDue());
+      void refreshGoals();
+      void refreshReview();
+      void (async () => {
+        setReviewDue(await isReviewDue());
+      })();
     }, [refreshGoals, refreshReview, setReviewDue])
   );
 
@@ -154,21 +156,23 @@ export default function ReviewScreen() {
   };
 
   const handleSave = () => {
-    const whatDrifted = otherDrift.trim();
-    const didSave = saveReview(
-      wins.trim(),
-      whatDrifted,
-      selectedReasons,
-      adjustment.trim()
-    );
-    if (!didSave) return;
+    void (async () => {
+      const whatDrifted = otherDrift.trim();
+      const didSave = await saveReview(
+        wins.trim(),
+        whatDrifted,
+        selectedReasons,
+        adjustment.trim()
+      );
+      if (!didSave) return;
 
-    if (nextFocus.trim() && activeGoal) {
-      setWeeklyFocusText(activeGoal.id, nextFocus.trim());
-    }
+      if (nextFocus.trim() && activeGoal) {
+        await setWeeklyFocusText(activeGoal.id, nextFocus.trim());
+      }
 
-    setSaved(true);
-    setReviewDue(false);
+      setSaved(true);
+      setReviewDue(false);
+    })();
   };
 
   const canSave =
@@ -179,6 +183,13 @@ export default function ReviewScreen() {
 
   const completionRate =
     weekStats.total > 0 ? Math.round((weekStats.done / weekStats.total) * 100) : null;
+  const totalFocusSessions = weekStats.focusSessions.length;
+  const completedFocusSessions = weekStats.focusSessions.filter(
+    (session) => session.status === 'completed'
+  ).length;
+  const abandonedFocusSessions = weekStats.focusSessions.filter(
+    (session) => session.status === 'abandoned'
+  ).length;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -221,6 +232,15 @@ export default function ReviewScreen() {
               </View>
             )}
           </View>
+
+          {weekStats.focusSessions.length > 0 ? (
+            <Text style={styles.focusSummary}>
+              Focused {formatDurationCompact(weekStats.focusSeconds)} across {totalFocusSessions}
+              {totalFocusSessions === 1 ? ' session' : ' sessions'}.
+              {' '}
+              {completedFocusSessions} completed, {abandonedFocusSessions} exited early.
+            </Text>
+          ) : null}
 
           {saved ? (
             <View style={styles.savedBadge}>
@@ -345,6 +365,11 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     gap: 10,
+    marginBottom: 14,
+  },
+  focusSummary: {
+    fontSize: 13,
+    color: C.textSecondary,
     marginBottom: 14,
   },
   statPill: {

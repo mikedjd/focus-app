@@ -12,12 +12,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
-  dbClearOnboardingDraft,
-  dbCompleteOnboarding,
-  dbGetOnboardingDraft,
-  dbIsReviewDue,
-  dbSaveOnboardingDraft,
-} from '../src/db';
+  clearOnboardingDraft,
+  completeOnboarding,
+  getOnboardingDraft,
+  isReviewDue,
+  saveOnboardingDraft,
+} from '../src/api/client';
 import {
   GoalAnchorFields,
   GoalBasicsFields,
@@ -52,7 +52,8 @@ export default function OnboardingScreen() {
   const setResumeContext = useAppStore((state) => state.setResumeContext);
 
   const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState<OnboardingDraft>(() => dbGetOnboardingDraft() ?? EMPTY_DRAFT);
+  const [draft, setDraft] = useState<OnboardingDraft>(EMPTY_DRAFT);
+  const [draftReady, setDraftReady] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const lastAutoAnchor = useRef(
     generateAnchorLines({
@@ -63,8 +64,29 @@ export default function OnboardingScreen() {
   );
 
   useEffect(() => {
-    dbSaveOnboardingDraft(draft);
-  }, [draft]);
+    if (!draftReady) {
+      return;
+    }
+    void saveOnboardingDraft(draft);
+  }, [draft, draftReady]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const savedDraft = await getOnboardingDraft();
+      if (!cancelled) {
+        if (savedDraft) {
+          setDraft(savedDraft);
+        }
+        setDraftReady(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const nextAutoAnchor = generateAnchorLines({
@@ -138,17 +160,19 @@ export default function OnboardingScreen() {
 
   const handleFinish = () => {
     setSubmitError(null);
-    const result = dbCompleteOnboarding(draft);
-    if (!result.goal) {
-      setSubmitError('That did not save correctly. Try once more.');
-      return;
-    }
+    void (async () => {
+      const result = await completeOnboarding(draft);
+      if (!result.goal) {
+        setSubmitError('That did not save correctly. Try once more.');
+        return;
+      }
 
-    dbClearOnboardingDraft();
-    setResumeContext(null);
-    setReviewDue(dbIsReviewDue());
-    setOnboardingComplete(true);
-    router.replace('/(tabs)');
+      await clearOnboardingDraft();
+      setResumeContext(null);
+      setReviewDue(await isReviewDue());
+      setOnboardingComplete(true);
+      router.replace('/(tabs)');
+    })();
   };
 
   const progress = (step + 1) / TOTAL_STEPS;
@@ -268,7 +292,9 @@ export default function OnboardingScreen() {
               <TextInput
                 style={[formStyles.input, formStyles.inputMultiline]}
                 value={draft.weeklyFocus}
-                onChangeText={(value) => setDraft((current) => ({ ...current, weeklyFocus: value }))}
+                onChangeText={(value: string) =>
+                  setDraft((current) => ({ ...current, weeklyFocus: value }))
+                }
                 placeholder="What is the one thing to advance this week?"
                 placeholderTextColor={C.textMuted}
                 autoFocus

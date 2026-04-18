@@ -6,20 +6,27 @@ import { formatShortDate, isYesterday } from '../../utils/dates';
 
 interface Props {
   resumeContext: ResumeContext;
-  onCarryForward: (taskId: string) => void;
-  onDismiss: (taskId: string) => void;
+  onPrimaryAction: (resumeContext: ResumeContext) => void;
+  onDismiss: (resumeContext: ResumeContext) => void;
   errorMessage?: string | null;
 }
 
 export function ResumeContextBanner({
   resumeContext,
-  onCarryForward,
+  onPrimaryAction,
   onDismiss,
   errorMessage,
 }: Props) {
-  const label = isYesterday(resumeContext.fromDate)
-    ? 'Left unfinished yesterday'
-    : `Still unfinished from ${formatShortDate(resumeContext.fromDate)}`;
+  const label =
+    resumeContext.kind === 'focus-session'
+      ? resumeContext.sessionStatus === 'active'
+        ? 'Focus session still open'
+        : `You exited early${resumeContext.exitReason ? ` · ${formatExitReason(resumeContext.exitReason)}` : ''}`
+      : isYesterday(resumeContext.fromDate)
+        ? 'Left unfinished yesterday'
+        : `Still unfinished from ${formatShortDate(resumeContext.fromDate)}`;
+
+  const actionLabel = resumeContext.kind === 'focus-session' ? 'Resume' : 'Carry forward';
 
   return (
     <View style={styles.wrapper}>
@@ -34,12 +41,12 @@ export function ResumeContextBanner({
         <View style={styles.actions}>
           <TouchableOpacity
             style={styles.carryButton}
-            onPress={() => onCarryForward(resumeContext.taskId)}
+            onPress={() => onPrimaryAction(resumeContext)}
             activeOpacity={0.8}
           >
-            <Text style={styles.carryButtonText}>Carry forward</Text>
+            <Text style={styles.carryButtonText}>{actionLabel}</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => onDismiss(resumeContext.taskId)} hitSlop={12}>
+          <TouchableOpacity onPress={() => onDismiss(resumeContext)} hitSlop={12}>
             <Text style={styles.dismiss}>✕</Text>
           </TouchableOpacity>
         </View>
@@ -48,6 +55,25 @@ export function ResumeContextBanner({
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
     </View>
   );
+}
+
+function formatExitReason(reason: NonNullable<Extract<ResumeContext, { kind: 'focus-session' }>['exitReason']>): string {
+  switch (reason) {
+    case 'distraction':
+      return 'distraction';
+    case 'task_unclear':
+      return 'task unclear';
+    case 'too_tired':
+      return 'too tired';
+    case 'interrupted':
+      return 'interrupted';
+    case 'avoided_it':
+      return 'avoided it';
+    case 'switched_task':
+      return 'switched task';
+    default:
+      return reason;
+  }
 }
 
 const styles = StyleSheet.create({

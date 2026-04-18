@@ -1,60 +1,63 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { Goal, GoalWriteInput, WeeklyFocus } from '../types';
 import {
-  dbGetActiveGoal,
-  dbCreateGoal,
-  dbUpdateGoal,
-  dbCompleteGoal,
-  dbGetCurrentWeeklyFocus,
-  dbUpsertWeeklyFocus,
-} from '../db';
+  completeGoal as apiCompleteGoal,
+  createGoal as apiCreateGoal,
+  getActiveGoal,
+  getCurrentWeeklyFocus,
+  subscribeToDataChanges,
+  updateGoal as apiUpdateGoal,
+  upsertWeeklyFocus,
+} from '../api/client';
 
 export function useGoals() {
   const [activeGoal, setActiveGoal] = useState<Goal | null>(null);
   const [weeklyFocus, setWeeklyFocus] = useState<WeeklyFocus | null>(null);
 
-  const refresh = useCallback(() => {
-    const goal = dbGetActiveGoal();
+  const refresh = useCallback(async () => {
+    const goal = await getActiveGoal();
     setActiveGoal(goal);
     if (goal) {
-      setWeeklyFocus(dbGetCurrentWeeklyFocus(goal.id));
+      setWeeklyFocus(await getCurrentWeeklyFocus(goal.id));
     } else {
       setWeeklyFocus(null);
     }
   }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
+  useEffect(() => subscribeToDataChanges(() => void refresh()), [refresh]);
+
   const createGoal = useCallback(
-    (input: GoalWriteInput) => {
-      dbCreateGoal(input);
-      refresh();
+    async (input: GoalWriteInput) => {
+      await apiCreateGoal(input);
+      await refresh();
     },
     [refresh]
   );
 
   const updateGoal = useCallback(
-    (id: string, input: GoalWriteInput) => {
-      dbUpdateGoal(id, input);
-      refresh();
+    async (id: string, input: GoalWriteInput) => {
+      await apiUpdateGoal(id, input);
+      await refresh();
     },
     [refresh]
   );
 
   const completeGoal = useCallback(
-    (id: string) => {
-      dbCompleteGoal(id);
-      refresh();
+    async (id: string) => {
+      await apiCompleteGoal(id);
+      await refresh();
     },
     [refresh]
   );
 
   const setWeeklyFocusText = useCallback(
-    (goalId: string, focus: string) => {
-      dbUpsertWeeklyFocus(goalId, focus);
-      refresh();
+    async (goalId: string, focus: string) => {
+      await upsertWeeklyFocus(goalId, focus);
+      await refresh();
     },
     [refresh]
   );

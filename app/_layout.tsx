@@ -1,13 +1,8 @@
 import { useEffect } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import {
-  getDb,
-  dbRefreshResumeContext,
-  dbIsReviewDue,
-  dbIsOnboardingComplete,
-} from '../src/db';
+import { getAppBootstrap } from '../src/api/client';
 import { C } from '../src/constants/colors';
 import { useAppStore } from '../src/store/useAppStore';
 
@@ -20,18 +15,28 @@ export default function RootLayout() {
   const setReviewDue = useAppStore((s) => s.setReviewDue);
 
   useEffect(() => {
-    // Register service worker for PWA offline support on web
-    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {
-        // SW registration failing is non-fatal (e.g. local dev)
-      });
-    }
+    let cancelled = false;
 
-    getDb();
-    setOnboardingComplete(dbIsOnboardingComplete());
-    setResumeContext(dbRefreshResumeContext());
-    setReviewDue(dbIsReviewDue());
-    setAppReady(true);
+    void (async () => {
+      try {
+        const bootstrap = await getAppBootstrap();
+        if (cancelled) {
+          return;
+        }
+
+        setOnboardingComplete(bootstrap.onboardingComplete);
+        setResumeContext(bootstrap.resumeContext);
+        setReviewDue(bootstrap.reviewDue);
+      } finally {
+        if (!cancelled) {
+          setAppReady(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [setAppReady, setOnboardingComplete, setResumeContext, setReviewDue]);
 
   if (!appReady) {

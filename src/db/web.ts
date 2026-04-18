@@ -6,6 +6,8 @@
 
 import type {
   DailyTask,
+  FocusExitReason,
+  FocusSession,
   Goal,
   GoalWriteInput,
   ResumeContext,
@@ -23,11 +25,13 @@ const KEY_GOALS = 'adhd_goals';
 const KEY_TASKS = 'adhd_tasks';
 const KEY_FOCUSES = 'adhd_focuses';
 const KEY_REVIEWS = 'adhd_reviews';
+const KEY_FOCUS_SESSIONS = 'adhd_focus_sessions';
 const KEY_CTX_PREFIX = 'adhd_ctx_';
 
 const DAILY_TASK_CAP = 3;
 const RESUME_CONTEXT_KEY = 'resume_context';
 const DISMISSED_RESUME_TASK_ID_KEY = 'dismissed_resume_task_id';
+const FOCUS_RESUME_WINDOW_MS = 36 * 60 * 60 * 1000;
 
 // ─── Raw localStorage helpers ────────────────────────────────────────────────
 
@@ -202,7 +206,7 @@ export function dbCreateTask(
   title: string,
   goalId: string,
   weeklyFocusId?: string | null,
-  options?: { date?: string; sourceTaskId?: string | null }
+  options?: { date?: string; sourceTaskId?: string | null; nextStep?: string }
 ): TaskWriteResult {
   if (!goalId) return { ok: false, reason: 'missing_goal' };
   const tasks = load<DailyTask>(KEY_TASKS);
@@ -216,6 +220,7 @@ export function dbCreateTask(
     weeklyFocusId: weeklyFocusId ?? null,
     sourceTaskId: options?.sourceTaskId ?? null,
     title,
+    nextStep: cleanText(options?.nextStep),
     date: targetDate,
     status: 'pending',
     completedAt: null,
@@ -241,6 +246,7 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
     weeklyFocusId: source.weeklyFocusId,
     sourceTaskId: source.id,
     title: source.title,
+    nextStep: source.nextStep,
     date: targetDate,
     status: 'pending',
     completedAt: null,
@@ -271,6 +277,160 @@ export function dbDropTask(id: string): boolean {
   save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'dropped' as const } : t)));
   webRefreshResumeContext();
   return true;
+}
+
+// ─── Focus session functions ─────────────────────────────────────────────────
+
+function getSessionDurationSeconds(startedAt: number, endedAt: number): number {
+  return Math.max(0, Math.floor((endedAt - startedAt) / 1000));
+}
+
+function saveFocusSessions(sessions: FocusSession[]): void {
+  save(KEY_FOCUS_SESSIONS, sessions);
+}
+
+export function dbGetFocusSessionById(id: string): FocusSession | null {
+  return load<FocusSession>(KEY_FOCUS_SESSIONS).find((session) => session.id === id) ?? null;
+}
+
+export function dbGetActiveFocusSession(): FocusSession | null {
+  return (
+    load<FocusSession>(KEY_FOCUS_SESSIONS)
+      .filter((session) => session.status === 'active')
+      .sort((a, b) => b.startedAt - a.startedAt)[0] ?? null
+  );
+}
+
+export function dbGetActiveFocusSessionForTask(taskId: string): FocusSession | null {
+  return (
+    load<FocusSession>(KEY_FOCUS_SESSIONS)
+      .filter((session) => session.taskId === taskId && session.status === 'active')
+      .sort((a, b) => b.startedAt - a.startedAt)[0] ?? null
+  );
+}
+
+export function dbGetMostRecentAbandonedFocusSession(taskId?: string): FocusSession | null {
+  return (
+    load<FocusSession>(KEY_FOCUS_SESSIONS)
+      .filter((session) => session.status === 'abandoned' && (!taskId || session.taskId === taskId))
+      .sort((a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt))[0] ?? null
+  );
+}
+
+export function dbStartFocusSession(taskId: string): FocusSession | null {
+  const sessions = load<FocusSession>(KEY_FOCUS_SESSIONS);
+  const active = [...sessions]
+    .filter((session) => session.status === 'active')
+    .sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
+
+  if (active?.taskId === taskId) {
+    return active;
+  }
+
+  const now = Date.now();
+  const nextSessions = sessions.map((session) => {
+    if (session.id !== active?.id) {
+      return session;
+    }
+
+    return {
+      ...session,
+      endedAt: now,
+      durationSeconds: getSessionDurationSeconds(session.startedAt, now),
+      status: 'abandoned' as const,
+      exitReason: 'switched_task' as const,
+      lastHeartbeatAt: now,
+    };
+  });
+
+  const created: FocusSession = {
+    id: generateId(),
+    taskId,
+    startedAt: now,
+    endedAt: null,
+    durationSeconds: 0,
+    status: 'active',
+    exitReason: null,
+    lastHeartbeatAt: now,
+  };
+
+  saveFocusSessions([...nextSessions, created]);
+  webRefreshResumeContext();
+  return created;
+}
+
+export function dbTouchFocusSession(id: string): boolean {
+  const sessions = load<FocusSession>(KEY_FOCUS_SESSIONS);
+  saveFocusSessions(
+    sessions.map((session) =>
+      session.id === id && session.status === 'active'
+        ? { ...session, lastHeartbeatAt: Date.now() }
+        : session
+    )
+  );
+  return true;
+}
+
+export function dbCompleteFocusSession(id: string): FocusSession | null {
+  const sessions = load<FocusSession>(KEY_FOCUS_SESSIONS);
+  const existing = sessions.find((session) => session.id === id);
+  if (!existing) {
+    return null;
+  }
+
+  const endedAt = Date.now();
+  const next = {
+    ...existing,
+    endedAt,
+    durationSeconds: getSessionDurationSeconds(existing.startedAt, endedAt),
+    status: 'completed' as const,
+    exitReason: null,
+    lastHeartbeatAt: endedAt,
+  };
+
+  saveFocusSessions(sessions.map((session) => (session.id === id ? next : session)));
+  webRefreshResumeContext();
+  return next;
+}
+
+export function dbAbandonFocusSession(
+  id: string,
+  reason: Exclude<FocusExitReason, 'switched_task'>
+): FocusSession | null {
+  const sessions = load<FocusSession>(KEY_FOCUS_SESSIONS);
+  const existing = sessions.find((session) => session.id === id);
+  if (!existing) {
+    return null;
+  }
+
+  const endedAt = Date.now();
+  const next = {
+    ...existing,
+    endedAt,
+    durationSeconds: getSessionDurationSeconds(existing.startedAt, endedAt),
+    status: 'abandoned' as const,
+    exitReason: reason,
+    lastHeartbeatAt: endedAt,
+  };
+
+  saveFocusSessions(sessions.map((session) => (session.id === id ? next : session)));
+  webRefreshResumeContext();
+  return next;
+}
+
+export function dbGetFocusSessionsForTask(taskId: string): FocusSession[] {
+  return load<FocusSession>(KEY_FOCUS_SESSIONS)
+    .filter((session) => session.taskId === taskId)
+    .sort((a, b) => b.startedAt - a.startedAt);
+}
+
+export function dbGetFocusSessionsForWeek(weekOf: string): FocusSession[] {
+  const [year, month, day] = weekOf.split('-').map(Number);
+  const start = new Date(year, month - 1, day).getTime();
+  const end = new Date(year, month - 1, day + 7).getTime();
+  return load<FocusSession>(KEY_FOCUS_SESSIONS)
+    .filter((session) => session.startedAt >= start && session.startedAt < end)
+    .sort((a, b) => b.startedAt - a.startedAt);
 }
 
 // ─── Review functions ─────────────────────────────────────────────────────────
@@ -345,8 +505,12 @@ export function dbGetResumeContext(): ResumeContext | null {
   }
 }
 
-export function dbDismissResumeContext(taskId: string): boolean {
-  ctxSet(DISMISSED_RESUME_TASK_ID_KEY, taskId);
+export function dbDismissResumeContext(resumeContext: ResumeContext): boolean {
+  const key =
+    resumeContext.kind === 'focus-session'
+      ? `focus-session:${resumeContext.focusSessionId}`
+      : `carry-forward:${resumeContext.taskId}`;
+  ctxSet(DISMISSED_RESUME_TASK_ID_KEY, key);
   ctxRemove(RESUME_CONTEXT_KEY);
   return true;
 }
@@ -407,8 +571,68 @@ export function dbCompleteOnboarding(
 
 function webRefreshResumeContext(): ResumeContext | null {
   const tasks = load<DailyTask>(KEY_TASKS);
-  const dismissedId = ctxGet(DISMISSED_RESUME_TASK_ID_KEY);
+  const sessions = load<FocusSession>(KEY_FOCUS_SESSIONS);
+  const dismissedKey = ctxGet(DISMISSED_RESUME_TASK_ID_KEY);
   const today = todayString();
+  const dismissedFocusSessionId = dismissedKey?.startsWith('focus-session:')
+    ? dismissedKey.slice('focus-session:'.length)
+    : null;
+  const dismissedTaskId = dismissedKey?.startsWith('carry-forward:')
+    ? dismissedKey.slice('carry-forward:'.length)
+    : null;
+
+  const activeFocusSession = sessions
+    .filter((session) => session.status === 'active' && session.id !== dismissedFocusSessionId)
+    .sort((a, b) => b.lastHeartbeatAt - a.lastHeartbeatAt || b.startedAt - a.startedAt)
+    .find((session) => tasks.some((task) => task.id === session.taskId && task.status === 'pending'))
+    ?? null;
+
+  if (activeFocusSession) {
+    const task = tasks.find((candidate) => candidate.id === activeFocusSession.taskId)!;
+    const ctx: ResumeContext = {
+      kind: 'focus-session',
+      taskId: task.id,
+      taskTitle: task.title,
+      goalId: task.goalId,
+      weeklyFocusId: task.weeklyFocusId,
+      focusSessionId: activeFocusSession.id,
+      startedAt: activeFocusSession.startedAt,
+      lastHeartbeatAt: activeFocusSession.lastHeartbeatAt,
+      sessionStatus: 'active',
+      exitReason: activeFocusSession.exitReason,
+    };
+    ctxSet(RESUME_CONTEXT_KEY, JSON.stringify(ctx));
+    return ctx;
+  }
+
+  const recentAbandonedFocusSession = sessions
+    .filter(
+      (session) =>
+        session.status === 'abandoned' &&
+        session.id !== dismissedFocusSessionId &&
+        (session.endedAt ?? session.startedAt) >= Date.now() - FOCUS_RESUME_WINDOW_MS
+    )
+    .sort((a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt))
+    .find((session) => tasks.some((task) => task.id === session.taskId && task.status === 'pending'))
+    ?? null;
+
+  if (recentAbandonedFocusSession) {
+    const task = tasks.find((candidate) => candidate.id === recentAbandonedFocusSession.taskId)!;
+    const ctx: ResumeContext = {
+      kind: 'focus-session',
+      taskId: task.id,
+      taskTitle: task.title,
+      goalId: task.goalId,
+      weeklyFocusId: task.weeklyFocusId,
+      focusSessionId: recentAbandonedFocusSession.id,
+      startedAt: recentAbandonedFocusSession.startedAt,
+      lastHeartbeatAt: recentAbandonedFocusSession.lastHeartbeatAt,
+      sessionStatus: 'abandoned',
+      exitReason: recentAbandonedFocusSession.exitReason,
+    };
+    ctxSet(RESUME_CONTEXT_KEY, JSON.stringify(ctx));
+    return ctx;
+  }
 
   // Find oldest uncarried pending task from the past 7 days (not today)
   const cutoffDate = formatDate((() => { const d = new Date(); d.setDate(d.getDate() - 7); return d; })());
@@ -418,7 +642,7 @@ function webRefreshResumeContext(): ResumeContext | null {
       if (t.status !== 'pending') return false;
       if (t.date >= today) return false;
       if (t.date < cutoffDate) return false;
-      if (t.id === dismissedId) return false;
+      if (t.id === dismissedTaskId) return false;
       // Skip if already carried forward
       const isCarried = tasks.some((c) => c.sourceTaskId === t.id);
       if (isCarried) return false;
@@ -434,6 +658,7 @@ function webRefreshResumeContext(): ResumeContext | null {
 
   if (candidate) {
     const ctx: ResumeContext = {
+      kind: 'carry-forward',
       taskId: candidate.id,
       taskTitle: candidate.title,
       fromDate: candidate.date,

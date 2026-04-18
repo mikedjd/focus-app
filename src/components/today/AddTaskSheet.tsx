@@ -8,28 +8,30 @@ interface Props {
   visible: boolean;
   activeGoalTitle?: string;
   onClose: () => void;
-  onSubmit: (title: string) => TaskWriteResult;
+  onSubmit: (title: string, nextStep?: string) => Promise<TaskWriteResult>;
 }
 
 export function AddTaskSheet({ visible, activeGoalTitle, onClose, onSubmit }: Props) {
   const [title, setTitle] = useState('');
+  const [nextStep, setNextStep] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) {
       setTitle('');
+      setNextStep('');
       setErrorMessage(null);
     }
   }, [visible]);
 
   const canSubmit = useMemo(() => title.trim().length > 0, [title]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!canSubmit) {
       return;
     }
 
-    const result = onSubmit(title.trim());
+    const result = await onSubmit(title.trim(), nextStep.trim());
     if (result.ok) {
       setTitle('');
       setErrorMessage(null);
@@ -57,7 +59,7 @@ export function AddTaskSheet({ visible, activeGoalTitle, onClose, onSubmit }: Pr
       <TextInput
         style={styles.input}
         value={title}
-        onChangeText={(nextValue) => {
+        onChangeText={(nextValue: string) => {
           setTitle(nextValue);
           if (errorMessage) {
             setErrorMessage(null);
@@ -67,9 +69,20 @@ export function AddTaskSheet({ visible, activeGoalTitle, onClose, onSubmit }: Pr
         placeholderTextColor={C.textMuted}
         autoFocus
         returnKeyType="done"
-        onSubmitEditing={handleSubmit}
+        onSubmitEditing={() => void handleSubmit()}
         multiline={false}
         maxLength={120}
+      />
+      <TextInput
+        style={[styles.input, styles.secondaryInput]}
+        value={nextStep}
+        onChangeText={setNextStep}
+        placeholder="Optional next step to show in focus mode"
+        placeholderTextColor={C.textMuted}
+        returnKeyType="done"
+        onSubmitEditing={() => void handleSubmit()}
+        multiline={false}
+        maxLength={140}
       />
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
       <View style={styles.actions}>
@@ -78,7 +91,7 @@ export function AddTaskSheet({ visible, activeGoalTitle, onClose, onSubmit }: Pr
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.confirmButton, !canSubmit && styles.confirmButtonDisabled]}
-          onPress={handleSubmit}
+          onPress={() => void handleSubmit()}
           disabled={!canSubmit}
         >
           <Text style={styles.confirmButtonText}>Add</Text>
@@ -107,6 +120,9 @@ const styles = StyleSheet.create({
     borderBottomColor: C.accent,
     paddingVertical: 10,
     marginBottom: 16,
+  },
+  secondaryInput: {
+    fontSize: 14,
   },
   errorText: {
     fontSize: 13,
