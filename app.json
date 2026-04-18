@@ -40,6 +40,7 @@
       "output": "static",
       "favicon": "./assets/icon.png",
       "bundler": "metro",
+      "publicPath": "/focus-app",
       "name": "Focus",
       "shortName": "Focus",
       "description": "One goal. Three tasks. Execute.",
@@ -47,7 +48,8 @@
       "backgroundColor": "#F8F7F4"
     },
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "baseUrl": "/focus-app"
     }
   }
 }
