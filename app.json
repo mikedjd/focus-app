@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "Focus",
+    "slug": "adhd-focus",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "focus",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "backgroundColor": "#F8F7F4"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.adhd.focus"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F8F7F4"
+      },
+      "package": "com.adhd.focus"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "color": "#3B5BDB"
+        }
+      ],
+      "expo-asset"
+    ],
+    "web": {
+      "output": "static",
+      "favicon": "./assets/icon.png",
+      "bundler": "metro",
+      "name": "Focus",
+      "shortName": "Focus",
+      "description": "One goal. Three tasks. Execute.",
+      "themeColor": "#3B5BDB",
+      "backgroundColor": "#F8F7F4"
+    },
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
