@@ -24,7 +24,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npx expo export --platform web
+      - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
