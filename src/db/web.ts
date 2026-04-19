@@ -11,12 +11,13 @@ import type {
   FocusExitReason,
   FocusSession,
   Goal,
+  GoalStatus,
   GoalWriteInput,
   Project,
   ResumeContext,
+  TaskWriteResult,
   WeeklyFocus,
   WeeklyReview,
-  TaskWriteResult,
 } from '../types';
 import { formatDate, getPrevWeekStart, getWeekStart, todayString } from '../utils/dates';
 import { generateAnchorLines } from '../utils/goalAnchors';
@@ -38,6 +39,7 @@ const DAILY_TASK_CAP = 3;
 const RESUME_CONTEXT_KEY = 'resume_context';
 const DISMISSED_RESUME_TASK_ID_KEY = 'dismissed_resume_task_id';
 const FOCUS_RESUME_WINDOW_MS = 36 * 60 * 60 * 1000;
+const GOAL_STATUS_ORDER: GoalStatus[] = ['active', 'queued', 'parked', 'completed'];
 
 // ─── Raw localStorage helpers ────────────────────────────────────────────────
 
@@ -84,6 +86,14 @@ function cleanText(value?: string | null): string {
   return value?.trim() ?? '';
 }
 
+function clampGoalRating(value: number | undefined, fallback: number): number {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.min(3, Math.round(value)));
+}
+
 function normalizeGoalInput(input: GoalWriteInput) {
   const practicalReason = cleanText(input.practicalReason);
   const emotionalReason = cleanText(input.emotionalReason);
@@ -102,21 +112,96 @@ function normalizeGoalInput(input: GoalWriteInput) {
     costOfDrift,
     anchorWhy,
     anchorDrift,
+    importance: clampGoalRating(input.importance, 2),
+    urgency: clampGoalRating(input.urgency, 1),
+    payoff: clampGoalRating(input.payoff, 2),
+    whyNow: cleanText(input.whyNow),
   };
+}
+
+function normalizeStoredGoal(goal: Goal | (Partial<Goal> & { id: string; title: string; createdAt: number })): Goal {
+  const status = goal.status === 'archived' ? 'parked' : goal.status;
+  return {
+    id: goal.id,
+    title: cleanText(goal.title),
+    targetOutcome: cleanText(goal.targetOutcome) || cleanText(goal.title),
+    targetDate: cleanText(goal.targetDate) || null,
+    metric: cleanText(goal.metric),
+    why: cleanText(goal.why) || cleanText(goal.anchorWhy),
+    practicalReason: cleanText(goal.practicalReason),
+    emotionalReason: cleanText(goal.emotionalReason),
+    costOfDrift: cleanText(goal.costOfDrift),
+    anchorWhy: cleanText(goal.anchorWhy),
+    anchorDrift: cleanText(goal.anchorDrift),
+    importance: clampGoalRating(goal.importance, 2),
+    urgency: clampGoalRating(goal.urgency, 1),
+    payoff: clampGoalRating(goal.payoff, 2),
+    whyNow: cleanText(goal.whyNow),
+    createdAt: goal.createdAt,
+    status:
+      status === 'active' || status === 'queued' || status === 'parked' || status === 'completed'
+        ? status
+        : 'parked',
+  };
+}
+
+function getGoalsStore(): Goal[] {
+  const rawGoals = load<Goal>(KEY_GOALS);
+  const normalizedGoals = rawGoals.map((goal) =>
+    normalizeStoredGoal(goal as Goal & { status?: GoalStatus | 'archived' })
+  );
+
+  const activeGoals = normalizedGoals.filter((goal) => goal.status === 'active').sort((a, b) => b.createdAt - a.createdAt);
+  let hydratedGoals = normalizedGoals;
+
+  if (activeGoals.length > 1) {
+    const activeGoalId = activeGoals[0].id;
+    hydratedGoals = normalizedGoals.map((goal) =>
+      goal.status === 'active' && goal.id !== activeGoalId ? { ...goal, status: 'queued' } : goal
+    );
+  }
+
+  if (JSON.stringify(rawGoals) !== JSON.stringify(hydratedGoals)) {
+    save(KEY_GOALS, hydratedGoals);
+  }
+
+  return hydratedGoals;
+}
+
+function sortGoals(goals: Goal[]): Goal[] {
+  return [...goals].sort((a, b) => {
+    const statusDelta = GOAL_STATUS_ORDER.indexOf(a.status) - GOAL_STATUS_ORDER.indexOf(b.status);
+    if (statusDelta !== 0) {
+      return statusDelta;
+    }
+
+    const scoreA = a.importance * 3 + a.payoff * 2 + a.urgency;
+    const scoreB = b.importance * 3 + b.payoff * 2 + b.urgency;
+    if (scoreA !== scoreB) {
+      return scoreB - scoreA;
+    }
+
+    return b.createdAt - a.createdAt;
+  });
 }
 
 // ─── Goal functions ───────────────────────────────────────────────────────────
 
 export function dbGetActiveGoal(): Goal | null {
-  const goals = load<Goal>(KEY_GOALS);
-  return goals.filter((g) => g.status === 'active').sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+  return getGoalsStore().find((goal) => goal.status === 'active') ?? null;
 }
 
-export function dbCreateGoal(input: GoalWriteInput): Goal | null {
-  const goals = load<Goal>(KEY_GOALS);
-  // Archive any existing active goal
-  const updated = goals.map((g) => (g.status === 'active' ? { ...g, status: 'archived' as const } : g));
+export function dbGetGoals(): Goal[] {
+  return sortGoals(getGoalsStore());
+}
+
+export function dbCreateGoal(
+  input: GoalWriteInput,
+  options?: { status?: Exclude<GoalStatus, 'completed'> }
+): Goal | null {
+  const goals = getGoalsStore();
   const n = normalizeGoalInput(input);
+  const nextStatus = options?.status ?? (goals.some((goal) => goal.status === 'active') ? 'parked' : 'active');
   const goal: Goal = {
     id: generateId(),
     title: n.title,
@@ -129,15 +214,25 @@ export function dbCreateGoal(input: GoalWriteInput): Goal | null {
     costOfDrift: n.costOfDrift || '',
     anchorWhy: n.anchorWhy || '',
     anchorDrift: n.anchorDrift || '',
+    importance: n.importance,
+    urgency: n.urgency,
+    payoff: n.payoff,
+    whyNow: n.whyNow,
     createdAt: Date.now(),
-    status: 'active',
+    status: nextStatus,
   };
-  save(KEY_GOALS, [...updated, goal]);
+  const updatedGoals =
+    nextStatus === 'active'
+      ? goals.map((existingGoal) =>
+          existingGoal.status === 'active' ? { ...existingGoal, status: 'queued' as const } : existingGoal
+        )
+      : goals;
+  save(KEY_GOALS, [...updatedGoals, goal]);
   return goal;
 }
 
 export function dbUpdateGoal(id: string, input: GoalWriteInput): boolean {
-  const goals = load<Goal>(KEY_GOALS);
+  const goals = getGoalsStore();
   const n = normalizeGoalInput(input);
   const updated = goals.map((g) =>
     g.id === id
@@ -153,6 +248,10 @@ export function dbUpdateGoal(id: string, input: GoalWriteInput): boolean {
           costOfDrift: n.costOfDrift,
           anchorWhy: n.anchorWhy,
           anchorDrift: n.anchorDrift,
+          importance: n.importance,
+          urgency: n.urgency,
+          payoff: n.payoff,
+          whyNow: n.whyNow,
         }
       : g
   );
@@ -160,8 +259,25 @@ export function dbUpdateGoal(id: string, input: GoalWriteInput): boolean {
   return true;
 }
 
+export function dbSetGoalStatus(id: string, status: Exclude<GoalStatus, 'completed'>): boolean {
+  const goals = getGoalsStore();
+  const updated = goals.map((goal) => {
+    if (status === 'active' && goal.status === 'active' && goal.id !== id) {
+      return { ...goal, status: 'queued' as const };
+    }
+
+    if (goal.id === id) {
+      return { ...goal, status };
+    }
+
+    return goal;
+  });
+  save(KEY_GOALS, updated);
+  return true;
+}
+
 export function dbCompleteGoal(id: string): boolean {
-  const goals = load<Goal>(KEY_GOALS);
+  const goals = getGoalsStore();
   save(KEY_GOALS, goals.map((g) => (g.id === id ? { ...g, status: 'completed' as const } : g)));
   return true;
 }
@@ -568,7 +684,11 @@ export function dbCompleteOnboarding(
     costOfDrift: draft.costOfDrift,
     anchorWhy: draft.anchorWhy,
     anchorDrift: draft.anchorDrift,
-  });
+    importance: draft.importance,
+    urgency: draft.urgency,
+    payoff: draft.payoff,
+    whyNow: draft.whyNow,
+  }, { status: 'active' });
   if (!goal) return { goal: null, weeklyFocusId: null };
   if (draft.weeklyFocus.trim()) dbUpsertWeeklyFocus(goal.id, draft.weeklyFocus.trim());
   ctxSet(ONBOARDING_COMPLETE_KEY, '1');

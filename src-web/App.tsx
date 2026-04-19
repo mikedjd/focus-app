@@ -16,6 +16,7 @@ import type {
   FocusExitReason,
   FocusSession,
   Goal,
+  GoalStatus,
   GoalWriteInput,
   OnboardingDraft,
   Project,
@@ -39,6 +40,16 @@ const MONTH_GRID_DAYS = 42;
 const HEARTBEAT_INTERVAL_MS = 15000;
 const WEB_CACHE_CLEANUP_KEY = 'focus-web-cache-cleanup-v2';
 const PROJECT_COLORS = ['#3B5BDB', '#2F9E44', '#E8590C', '#D6336C', '#0C8599', '#7950F2'];
+const GOAL_RATING_OPTIONS = [
+  { value: 1, label: 'Low' },
+  { value: 2, label: 'Medium' },
+  { value: 3, label: 'High' },
+] as const;
+const GOAL_PLACEMENT_OPTIONS: Array<{ value: Exclude<GoalStatus, 'completed'>; label: string }> = [
+  { value: 'active', label: 'Make active now' },
+  { value: 'queued', label: 'Queue next' },
+  { value: 'parked', label: 'Park for later' },
+];
 
 const EMPTY_ONBOARDING_DRAFT: OnboardingDraft = {
   goalTitle: '',
@@ -46,6 +57,10 @@ const EMPTY_ONBOARDING_DRAFT: OnboardingDraft = {
   hasTargetDate: false,
   targetDate: '',
   metric: '',
+  importance: 2,
+  urgency: 1,
+  payoff: 2,
+  whyNow: '',
   practicalReason: '',
   emotionalReason: '',
   costOfDrift: '',
@@ -117,6 +132,34 @@ function getWhatBrokeValue(review: { whatDrifted: string; driftReasons: string[]
     .join(', ');
 }
 
+function getGoalPriorityScore(goal: Pick<Goal, 'importance' | 'urgency' | 'payoff'>): number {
+  return goal.importance * 3 + goal.payoff * 2 + goal.urgency;
+}
+
+function getGoalPriorityLabel(goal: Pick<Goal, 'importance' | 'urgency' | 'payoff'>): string {
+  const score = getGoalPriorityScore(goal);
+  if (score >= 15) {
+    return 'High value';
+  }
+  if (score >= 11) {
+    return 'Strong candidate';
+  }
+  return 'Worth parking';
+}
+
+function getGoalStatusLabel(status: GoalStatus): string {
+  if (status === 'active') {
+    return 'Active';
+  }
+  if (status === 'queued') {
+    return 'Queued';
+  }
+  if (status === 'parked') {
+    return 'Parked';
+  }
+  return 'Completed';
+}
+
 function createGoalDraft(goal?: Goal | null): Omit<OnboardingDraft, 'weeklyFocus'> {
   return {
     goalTitle: goal?.title ?? '',
@@ -124,6 +167,10 @@ function createGoalDraft(goal?: Goal | null): Omit<OnboardingDraft, 'weeklyFocus
     hasTargetDate: !!goal?.targetDate,
     targetDate: goal?.targetDate ?? '',
     metric: goal?.metric ?? '',
+    importance: goal?.importance ?? 2,
+    urgency: goal?.urgency ?? 1,
+    payoff: goal?.payoff ?? 2,
+    whyNow: goal?.whyNow ?? '',
     practicalReason: goal?.practicalReason ?? '',
     emotionalReason: goal?.emotionalReason ?? '',
     costOfDrift: goal?.costOfDrift ?? '',
@@ -149,6 +196,10 @@ function toGoalWriteInput(draft: Omit<OnboardingDraft, 'weeklyFocus'>): GoalWrit
     costOfDrift: draft.costOfDrift.trim(),
     anchorWhy: draft.anchorWhy.trim() || autoAnchors.anchorWhy,
     anchorDrift: draft.anchorDrift.trim() || autoAnchors.anchorDrift,
+    importance: draft.importance,
+    urgency: draft.urgency,
+    payoff: draft.payoff,
+    whyNow: draft.whyNow.trim(),
   };
 }
 
@@ -279,6 +330,48 @@ function GoalFields({
         />
       </label>
 
+      <label className="field">
+        <span>Importance</span>
+        <select
+          value={draft.importance}
+          onChange={(event) => setDraft({ ...draft, importance: Number(event.target.value) })}
+        >
+          {GOAL_RATING_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field">
+        <span>Urgency</span>
+        <select
+          value={draft.urgency}
+          onChange={(event) => setDraft({ ...draft, urgency: Number(event.target.value) })}
+        >
+          {GOAL_RATING_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field">
+        <span>Payoff</span>
+        <select
+          value={draft.payoff}
+          onChange={(event) => setDraft({ ...draft, payoff: Number(event.target.value) })}
+        >
+          {GOAL_RATING_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <label className="toggle-field">
         <input
           checked={draft.hasTargetDate}
@@ -304,6 +397,16 @@ function GoalFields({
           />
         </label>
       ) : null}
+
+      <label className="field field-wide">
+        <span>Why this matters now</span>
+        <textarea
+          value={draft.whyNow}
+          onChange={(event) => setDraft({ ...draft, whyNow: event.target.value })}
+          placeholder="Why should this goal compete for the active slot right now?"
+          rows={2}
+        />
+      </label>
 
       <label className="field field-wide">
         <span>Practical reason</span>
@@ -380,6 +483,7 @@ function GoalModal({
   open,
   title,
   initialGoal,
+  defaultStatus = 'parked',
   onClose,
   onSubmit,
 }: {
@@ -387,12 +491,16 @@ function GoalModal({
   title: string;
   initialGoal?: Goal | null;
   onClose: () => void;
-  onSubmit: (input: GoalWriteInput) => void;
+  defaultStatus?: Exclude<GoalStatus, 'completed'>;
+  onSubmit: (input: GoalWriteInput, status: Exclude<GoalStatus, 'completed'>) => void;
 }) {
   const [draft, setDraft] = useState<OnboardingDraft>({
     ...EMPTY_ONBOARDING_DRAFT,
     ...createGoalDraft(initialGoal),
   });
+  const [status, setStatus] = useState<Exclude<GoalStatus, 'completed'>>(
+    initialGoal?.status === 'completed' ? defaultStatus : initialGoal?.status ?? defaultStatus
+  );
 
   useEffect(() => {
     if (!open) {
@@ -403,9 +511,10 @@ function GoalModal({
       ...EMPTY_ONBOARDING_DRAFT,
       ...createGoalDraft(initialGoal),
     });
-  }, [initialGoal, open]);
+    setStatus(initialGoal?.status === 'completed' ? defaultStatus : initialGoal?.status ?? defaultStatus);
+  }, [defaultStatus, initialGoal, open]);
 
-  const canSubmit = draft.goalTitle.trim() && draft.targetOutcome.trim();
+  const canSubmit = draft.goalTitle.trim().length > 0 && draft.targetOutcome.trim().length > 0;
 
   return (
     <Modal open={open} title={title} onClose={onClose}>
@@ -417,11 +526,21 @@ function GoalModal({
             return;
           }
 
-          onSubmit(toGoalWriteInput(draft));
+          onSubmit(toGoalWriteInput(draft), status);
           onClose();
         }}
       >
         <GoalFields draft={draft} setDraft={setDraft} />
+        <label className="field">
+          <span>Place this goal</span>
+          <select value={status} onChange={(event) => setStatus(event.target.value as Exclude<GoalStatus, 'completed'>)}>
+            {GOAL_PLACEMENT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="form-actions">
           <button className="secondary-button" type="button" onClick={onClose}>
             Cancel
@@ -1239,61 +1358,182 @@ function CalendarPage() {
   );
 }
 
+function GoalCard({
+  goal,
+  weeklyFocus,
+  onEdit,
+  onMakeActive,
+  onQueue,
+  onPark,
+  onComplete,
+}: {
+  goal: Goal;
+  weeklyFocus?: string | null;
+  onEdit: () => void;
+  onMakeActive: () => void;
+  onQueue: () => void;
+  onPark: () => void;
+  onComplete: () => void;
+}) {
+  const priorityLabel = getGoalPriorityLabel(goal);
+
+  return (
+    <section className={`card goal-card ${goal.status === 'active' ? 'is-active' : ''}`}>
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">{getGoalStatusLabel(goal.status)}</p>
+          <h3>{goal.title}</h3>
+        </div>
+        <span className="metric-chip">{priorityLabel}</span>
+      </div>
+
+      <p>{goal.targetOutcome}</p>
+
+      <div className="chips">
+        <span className="chip">Importance {GOAL_RATING_OPTIONS[goal.importance - 1].label}</span>
+        <span className="chip">Urgency {GOAL_RATING_OPTIONS[goal.urgency - 1].label}</span>
+        <span className="chip">Payoff {GOAL_RATING_OPTIONS[goal.payoff - 1].label}</span>
+        {goal.targetDate ? <span className="chip">Target {formatShortDate(goal.targetDate)}</span> : null}
+        {goal.metric ? <span className="chip">{goal.metric}</span> : null}
+      </div>
+
+      {goal.whyNow ? (
+        <div className="goal-copy-block">
+          <p className="eyebrow">Why now</p>
+          <p>{goal.whyNow}</p>
+        </div>
+      ) : null}
+
+      {goal.status === 'active' && weeklyFocus ? (
+        <div className="goal-copy-block">
+          <p className="eyebrow">Weekly focus</p>
+          <p>{weeklyFocus}</p>
+        </div>
+      ) : null}
+
+      <div className="goal-copy-block">
+        <p className="eyebrow">Anchor</p>
+        <p>{goal.anchorWhy || 'No why anchor set yet.'}</p>
+        <p>{goal.anchorDrift || 'No drift anchor set yet.'}</p>
+      </div>
+
+      <div className="task-actions">
+        {goal.status !== 'active' ? (
+          <button className="primary-button" type="button" onClick={onMakeActive}>
+            Make active
+          </button>
+        ) : null}
+        {goal.status !== 'queued' && goal.status !== 'completed' ? (
+          <button className="secondary-button" type="button" onClick={onQueue}>
+            Move to queue
+          </button>
+        ) : null}
+        {goal.status !== 'parked' && goal.status !== 'completed' ? (
+          <button className="ghost-button" type="button" onClick={onPark}>
+            Park it
+          </button>
+        ) : null}
+        <button className="ghost-button" type="button" onClick={onEdit}>
+          Edit
+        </button>
+        <button className="ghost-button danger-text" type="button" onClick={onComplete}>
+          Complete
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function GoalsPage() {
-  const { activeGoal, weeklyFocus } = useDataSnapshot(() => {
-    const activeGoal = db.dbGetActiveGoal();
+  const { goals, activeGoal, weeklyFocus } = useDataSnapshot(() => {
+    const goals = db.dbGetGoals();
+    const activeGoal = goals.find((goal) => goal.status === 'active') ?? null;
     return {
+      goals,
       activeGoal,
       weeklyFocus: activeGoal ? db.dbGetCurrentWeeklyFocus(activeGoal.id) : null,
     };
   });
 
   const [goalModalOpen, setGoalModalOpen] = useState(false);
+  const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [focusText, setFocusText] = useState(weeklyFocus?.focus ?? '');
 
   useEffect(() => {
     setFocusText(weeklyFocus?.focus ?? '');
   }, [weeklyFocus?.focus]);
 
+  const queuedGoals = goals.filter((goal) => goal.status === 'queued');
+  const parkedGoals = goals.filter((goal) => goal.status === 'parked');
+  const completedGoals = goals.filter((goal) => goal.status === 'completed');
+  const recommendedGoal = [...queuedGoals, ...parkedGoals].sort(
+    (a, b) => getGoalPriorityScore(b) - getGoalPriorityScore(a)
+  )[0] ?? null;
+  const defaultGoalStatus: Exclude<GoalStatus, 'completed'> = activeGoal ? 'queued' : 'active';
+
+  function openCreateGoal() {
+    setSelectedGoal(null);
+    setGoalModalOpen(true);
+  }
+
+  function openEditGoal(goal: Goal) {
+    setSelectedGoal(goal);
+    setGoalModalOpen(true);
+  }
+
   return (
     <>
       <section className="page-header">
         <div>
-          <p className="eyebrow">Goal</p>
-          <h2>{activeGoal ? activeGoal.title : 'Set one clear target'}</h2>
+          <p className="eyebrow">Goal vault</p>
+          <h2>{activeGoal ? activeGoal.title : 'Capture all goals, run one at a time'}</h2>
         </div>
         <div className="header-actions">
-          <button className="primary-button" type="button" onClick={() => setGoalModalOpen(true)}>
-            {activeGoal ? 'Edit goal' : 'Create goal'}
+          <button className="primary-button" type="button" onClick={openCreateGoal}>
+            Add goal
           </button>
         </div>
       </section>
 
-      {!activeGoal ? (
-        <section className="card empty-card">
-          <h3>One goal. One reason.</h3>
-          <p className="muted-copy">
-            The app works best when everything points at a single active goal.
-          </p>
+      {recommendedGoal ? (
+        <section className="card banner-card">
+          <div>
+            <p className="eyebrow">Recommended next</p>
+            <h3>{recommendedGoal.title}</h3>
+            <p className="muted-copy">
+              {getGoalPriorityLabel(recommendedGoal)} with strong importance/payoff signals.
+            </p>
+          </div>
+          <div className="inline-actions">
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => mutate(() => db.dbSetGoalStatus(recommendedGoal.id, 'active'))}
+            >
+              Make active
+            </button>
+            <button className="ghost-button" type="button" onClick={() => openEditGoal(recommendedGoal)}>
+              Review goal
+            </button>
+          </div>
         </section>
-      ) : (
-        <>
-          <section className="card">
-            <p className="eyebrow">Active goal</p>
-            <h3>{activeGoal.targetOutcome}</h3>
-            <div className="chips">
-              <span className="metric-chip">
-                {activeGoal.targetDate ? `Target ${formatShortDate(activeGoal.targetDate)}` : 'No fixed date'}
-              </span>
-              {activeGoal.metric ? <span className="metric-chip">{activeGoal.metric}</span> : null}
-            </div>
-          </section>
+      ) : null}
 
-          <section className="card">
-            <p className="eyebrow">Why it matters</p>
-            <p>{activeGoal.anchorWhy || 'No why anchor set yet.'}</p>
-            <p>{activeGoal.anchorDrift || 'No drift anchor set yet.'}</p>
-          </section>
+      {activeGoal ? (
+        <>
+          <GoalCard
+            goal={activeGoal}
+            weeklyFocus={weeklyFocus?.focus ?? null}
+            onEdit={() => openEditGoal(activeGoal)}
+            onMakeActive={() => {}}
+            onQueue={() => mutate(() => db.dbSetGoalStatus(activeGoal.id, 'queued'))}
+            onPark={() => mutate(() => db.dbSetGoalStatus(activeGoal.id, 'parked'))}
+            onComplete={() => {
+              if (window.confirm('Complete this goal and move it out of the active slot?')) {
+                mutate(() => db.dbCompleteGoal(activeGoal.id));
+              }
+            }}
+          />
 
           <section className="card">
             <div className="section-header">
@@ -1320,36 +1560,113 @@ function GoalsPage() {
               </button>
             </form>
           </section>
-
-          <section className="card">
-            <p className="eyebrow">Goal actions</p>
-            <button
-              className="ghost-button danger-text"
-              type="button"
-              onClick={() => {
-                if (window.confirm('Complete this goal and archive it?')) {
-                  mutate(() => db.dbCompleteGoal(activeGoal.id));
-                }
-              }}
-            >
-              Mark goal complete
-            </button>
-          </section>
         </>
+      ) : (
+        <section className="card empty-card">
+          <h3>No active goal yet</h3>
+          <p className="muted-copy">
+            Keep many goals in the vault, but choose one to drive Today, Calendar, and Focus.
+          </p>
+        </section>
       )}
+
+      <section className="goal-section">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Queued</p>
+            <h3>Likely next</h3>
+          </div>
+          <span className="metric-chip">{queuedGoals.length}</span>
+        </div>
+        {queuedGoals.length === 0 ? (
+          <section className="card empty-card">
+            <p className="muted-copy">Queue the goals that are close enough to matter, but not steering execution today.</p>
+          </section>
+        ) : (
+          <div className="goal-grid">
+            {queuedGoals.map((goal) => (
+              <GoalCard
+                key={goal.id}
+                goal={goal}
+                onEdit={() => openEditGoal(goal)}
+                onMakeActive={() => mutate(() => db.dbSetGoalStatus(goal.id, 'active'))}
+                onQueue={() => mutate(() => db.dbSetGoalStatus(goal.id, 'queued'))}
+                onPark={() => mutate(() => db.dbSetGoalStatus(goal.id, 'parked'))}
+                onComplete={() => mutate(() => db.dbCompleteGoal(goal.id))}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="goal-section">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Parked</p>
+            <h3>Captured without distraction</h3>
+          </div>
+          <span className="metric-chip">{parkedGoals.length}</span>
+        </div>
+        {parkedGoals.length === 0 ? (
+          <section className="card empty-card">
+            <p className="muted-copy">Park goals that matter, but should not compete for attention yet.</p>
+          </section>
+        ) : (
+          <div className="goal-grid">
+            {parkedGoals.map((goal) => (
+              <GoalCard
+                key={goal.id}
+                goal={goal}
+                onEdit={() => openEditGoal(goal)}
+                onMakeActive={() => mutate(() => db.dbSetGoalStatus(goal.id, 'active'))}
+                onQueue={() => mutate(() => db.dbSetGoalStatus(goal.id, 'queued'))}
+                onPark={() => mutate(() => db.dbSetGoalStatus(goal.id, 'parked'))}
+                onComplete={() => mutate(() => db.dbCompleteGoal(goal.id))}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {completedGoals.length > 0 ? (
+        <section className="goal-section">
+          <div className="section-header">
+            <div>
+              <p className="eyebrow">Completed</p>
+              <h3>Finished goals</h3>
+            </div>
+            <span className="metric-chip">{completedGoals.length}</span>
+          </div>
+          <div className="goal-grid">
+            {completedGoals.map((goal) => (
+              <section className="card goal-card" key={goal.id}>
+                <p className="eyebrow">Completed</p>
+                <h3>{goal.title}</h3>
+                <p>{goal.targetOutcome}</p>
+                <div className="chips">
+                  <span className="chip">{getGoalPriorityLabel(goal)}</span>
+                  {goal.targetDate ? <span className="chip">Target {formatShortDate(goal.targetDate)}</span> : null}
+                </div>
+              </section>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <GoalModal
         open={goalModalOpen}
-        title={activeGoal ? 'Edit goal' : 'Create goal'}
-        initialGoal={activeGoal}
+        title={selectedGoal ? 'Edit goal' : 'Add goal'}
+        initialGoal={selectedGoal}
+        defaultStatus={defaultGoalStatus}
         onClose={() => setGoalModalOpen(false)}
-        onSubmit={(input) => {
-          if (activeGoal) {
-            mutate(() => db.dbUpdateGoal(activeGoal.id, input));
+        onSubmit={(input, status) => {
+          if (selectedGoal) {
+            mutate(() => db.dbUpdateGoal(selectedGoal.id, input));
+            mutate(() => db.dbSetGoalStatus(selectedGoal.id, status));
             return;
           }
 
-          mutate(() => db.dbCreateGoal(input));
+          mutate(() => db.dbCreateGoal(input, { status }));
         }}
       />
     </>
@@ -1515,13 +1832,19 @@ function ReviewPage() {
 
 function OnboardingPage() {
   const navigate = useNavigate();
-  const [draft, setDraft] = useState<OnboardingDraft>(() => db.dbGetOnboardingDraft() ?? EMPTY_ONBOARDING_DRAFT);
+  const [draft, setDraft] = useState<OnboardingDraft>(() => ({
+    ...EMPTY_ONBOARDING_DRAFT,
+    ...(db.dbGetOnboardingDraft() ?? {}),
+  }));
 
   useEffect(() => {
     db.dbSaveOnboardingDraft(draft);
   }, [draft]);
 
-  const canSubmit = draft.goalTitle.trim() && draft.targetOutcome.trim() && draft.weeklyFocus.trim();
+  const canSubmit =
+    draft.goalTitle.trim().length > 0 &&
+    draft.targetOutcome.trim().length > 0 &&
+    draft.weeklyFocus.trim().length > 0;
 
   return (
     <div className="onboarding-shell">

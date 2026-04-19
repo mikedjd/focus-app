@@ -1,4 +1,4 @@
-export type GoalStatus = 'active' | 'completed' | 'archived';
+export type GoalStatus = 'active' | 'queued' | 'parked' | 'completed';
 export type TaskStatus = 'pending' | 'done' | 'dropped';
 export type FocusSessionStatus = 'active' | 'completed' | 'abandoned';
 export type FocusExitReason =
@@ -20,6 +20,10 @@ export interface GoalWriteInput {
   costOfDrift?: string;
   anchorWhy?: string;
   anchorDrift?: string;
+  importance?: number;
+  urgency?: number;
+  payoff?: number;
+  whyNow?: string;
 }
 
 export interface Goal {
@@ -34,6 +38,10 @@ export interface Goal {
   costOfDrift: string;
   anchorWhy: string;
   anchorDrift: string;
+  importance: number;
+  urgency: number;
+  payoff: number;
+  whyNow: string;
   createdAt: number;
   status: GoalStatus;
 }
@@ -130,6 +138,10 @@ export interface OnboardingDraft {
   hasTargetDate: boolean;
   targetDate: string;
   metric: string;
+  importance: number;
+  urgency: number;
+  payoff: number;
+  whyNow: string;
   practicalReason: string;
   emotionalReason: string;
   costOfDrift: string;
