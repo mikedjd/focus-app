@@ -1,24 +1,34 @@
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import * as db from '../src/db/web';
 
 type Listener = () => void;
 
 const listeners = new Set<Listener>();
+let version = 0;
 const channel =
   typeof BroadcastChannel !== 'undefined'
     ? new BroadcastChannel('focus-web-data')
     : null;
 
-function emit() {
+function notifyChange() {
+  version += 1;
   listeners.forEach((listener) => listener());
+}
+
+function emit() {
+  notifyChange();
   channel?.postMessage({ type: 'changed' });
 }
 
 function subscribe(listener: Listener) {
   listeners.add(listener);
 
-  const handleStorage = () => listener();
-  const handleMessage = () => listener();
+  const handleStorage = () => {
+    notifyChange();
+  };
+  const handleMessage = () => {
+    notifyChange();
+  };
 
   window.addEventListener('storage', handleStorage);
   channel?.addEventListener('message', handleMessage);
@@ -31,7 +41,13 @@ function subscribe(listener: Listener) {
 }
 
 export function useDataSnapshot<T>(getSnapshot: () => T): T {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const currentVersion = useSyncExternalStore(
+    subscribe,
+    () => version,
+    () => version
+  );
+
+  return useMemo(() => getSnapshot(), [currentVersion, getSnapshot]);
 }
 
 export function mutate<T>(run: () => T): T {
