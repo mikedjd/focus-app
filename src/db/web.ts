@@ -5,11 +5,14 @@
  */
 
 import type {
+  BrainDumpItem,
+  DailyReview,
   DailyTask,
   FocusExitReason,
   FocusSession,
   Goal,
   GoalWriteInput,
+  Project,
   ResumeContext,
   WeeklyFocus,
   WeeklyReview,
@@ -25,6 +28,9 @@ const KEY_GOALS = 'adhd_goals';
 const KEY_TASKS = 'adhd_tasks';
 const KEY_FOCUSES = 'adhd_focuses';
 const KEY_REVIEWS = 'adhd_reviews';
+const KEY_DAILY_REVIEWS = 'adhd_daily_reviews';
+const KEY_PROJECTS = 'adhd_projects';
+const KEY_BRAIN_DUMP = 'adhd_brain_dump';
 const KEY_FOCUS_SESSIONS = 'adhd_focus_sessions';
 const KEY_CTX_PREFIX = 'adhd_ctx_';
 
@@ -206,17 +212,19 @@ export function dbCreateTask(
   title: string,
   goalId: string,
   weeklyFocusId?: string | null,
-  options?: { date?: string; sourceTaskId?: string | null; nextStep?: string }
+  options?: { date?: string; sourceTaskId?: string | null; nextStep?: string; projectId?: string | null }
 ): TaskWriteResult {
   if (!goalId) return { ok: false, reason: 'missing_goal' };
   const tasks = load<DailyTask>(KEY_TASKS);
   const targetDate = options?.date ?? todayString();
-  if (targetDate === todayString() && getActiveTasks(tasks, targetDate).length >= DAILY_TASK_CAP) {
+  const isToday = targetDate === todayString();
+  if (isToday && getActiveTasks(tasks, targetDate).length >= DAILY_TASK_CAP) {
     return { ok: false, reason: 'task_limit_reached' };
   }
   const task: DailyTask = {
     id: generateId(),
     goalId,
+    projectId: options?.projectId ?? null,
     weeklyFocusId: weeklyFocusId ?? null,
     sourceTaskId: options?.sourceTaskId ?? null,
     title,
@@ -243,6 +251,7 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
   const task: DailyTask = {
     id: generateId(),
     goalId: source.goalId,
+    projectId: source.projectId ?? null,
     weeklyFocusId: source.weeklyFocusId,
     sourceTaskId: source.id,
     title: source.title,
@@ -565,6 +574,98 @@ export function dbCompleteOnboarding(
   ctxSet(ONBOARDING_COMPLETE_KEY, '1');
   ctxRemove(ONBOARDING_DRAFT_KEY);
   return { goal, weeklyFocusId: dbGetCurrentWeeklyFocus(goal.id)?.id ?? null };
+}
+
+// ─── Project functions ────────────────────────────────────────────────────────
+
+export function dbGetProjects(goalId: string): Project[] {
+  return load<Project>(KEY_PROJECTS)
+    .filter((p) => p.goalId === goalId)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+export function dbCreateProject(goalId: string, name: string, color: string): Project {
+  const projects = load<Project>(KEY_PROJECTS);
+  const goalProjects = projects.filter((p) => p.goalId === goalId);
+  const project: Project = {
+    id: generateId(),
+    goalId,
+    name: name.trim(),
+    color,
+    sortOrder: goalProjects.length,
+    createdAt: Date.now(),
+  };
+  save(KEY_PROJECTS, [...projects, project]);
+  return project;
+}
+
+export function dbUpdateProject(id: string, name: string, color: string): boolean {
+  const projects = load<Project>(KEY_PROJECTS);
+  save(KEY_PROJECTS, projects.map((p) => (p.id === id ? { ...p, name: name.trim(), color } : p)));
+  return true;
+}
+
+export function dbDeleteProject(id: string): boolean {
+  const projects = load<Project>(KEY_PROJECTS);
+  save(KEY_PROJECTS, projects.filter((p) => p.id !== id));
+  // Unlink tasks from deleted project
+  const tasks = load<DailyTask>(KEY_TASKS);
+  save(KEY_TASKS, tasks.map((t) => (t.projectId === id ? { ...t, projectId: null } : t)));
+  return true;
+}
+
+// ─── Daily review functions ───────────────────────────────────────────────────
+
+export function dbGetDailyReview(date: string): DailyReview | null {
+  return load<DailyReview>(KEY_DAILY_REVIEWS).find((r) => r.date === date) ?? null;
+}
+
+export function dbSaveDailyReview(
+  date: string,
+  wins: string,
+  drift: string,
+  tomorrowStep: string
+): DailyReview {
+  const reviews = load<DailyReview>(KEY_DAILY_REVIEWS);
+  const now = Date.now();
+  const existing = reviews.find((r) => r.date === date);
+  let result: DailyReview;
+  if (existing) {
+    result = { ...existing, wins, drift, tomorrowStep, completedAt: now };
+    save(KEY_DAILY_REVIEWS, reviews.map((r) => (r.date === date ? result : r)));
+  } else {
+    result = { id: generateId(), date, wins, drift, tomorrowStep, completedAt: now };
+    save(KEY_DAILY_REVIEWS, [...reviews, result]);
+  }
+  return result;
+}
+
+export function dbIsDailyReviewDue(): boolean {
+  const today = todayString();
+  return dbGetDailyReview(today) === null;
+}
+
+// ─── Brain dump functions ─────────────────────────────────────────────────────
+
+export function dbGetBrainDumpItems(): BrainDumpItem[] {
+  return load<BrainDumpItem>(KEY_BRAIN_DUMP).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function dbAddBrainDumpItem(text: string): BrainDumpItem {
+  const items = load<BrainDumpItem>(KEY_BRAIN_DUMP);
+  const item: BrainDumpItem = { id: generateId(), text: text.trim(), createdAt: Date.now() };
+  save(KEY_BRAIN_DUMP, [...items, item]);
+  return item;
+}
+
+export function dbDeleteBrainDumpItem(id: string): boolean {
+  save(KEY_BRAIN_DUMP, load<BrainDumpItem>(KEY_BRAIN_DUMP).filter((i) => i.id !== id));
+  return true;
+}
+
+export function dbUpdateBrainDumpItem(id: string, text: string): boolean {
+  save(KEY_BRAIN_DUMP, load<BrainDumpItem>(KEY_BRAIN_DUMP).map((i) => i.id === id ? { ...i, text: text.trim() } : i));
+  return true;
 }
 
 // ─── Internal ─────────────────────────────────────────────────────────────────

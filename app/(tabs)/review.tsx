@@ -14,27 +14,32 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { C } from '../../src/constants/colors';
 import { isReviewDue } from '../../src/api/client';
 import { useGoals } from '../../src/hooks/useGoals';
+import { useDailyReview } from '../../src/hooks/useDailyReview';
 import { usePrevWeekStart, useWeeklyReview } from '../../src/hooks/useWeeklyReview';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatDurationCompact, formatWeekRange } from '../../src/utils/dates';
 
-// ─── Drift reason chips ──────────────────────────────────────────────────────
+const DRIFT_REASON_LABELS: Record<string, string> = {
+  distracted: 'Got distracted',
+  over_complex: 'Overcomplicated it',
+  avoid_start: 'Avoided starting',
+  too_much: 'Took on too much',
+  interrupted: 'External interruption',
+  low_energy: 'Energy crashed',
+  lost_motive: 'Lost motivation',
+  unclear_next: 'Unclear next step',
+};
 
-interface DriftChip {
-  id: string;
-  label: string;
+function getWhatBrokeValue(review: { whatDrifted: string; driftReasons: string[] }): string {
+  const parts = [
+    review.whatDrifted.trim(),
+    ...review.driftReasons
+      .map((reason) => DRIFT_REASON_LABELS[reason] ?? reason)
+      .filter((reason) => reason.trim().length > 0),
+  ].filter((value, index, all) => value.length > 0 && all.indexOf(value) === index);
+
+  return parts.join(', ');
 }
-
-const DRIFT_CHIPS: DriftChip[] = [
-  { id: 'distracted',     label: 'Got distracted' },
-  { id: 'over_complex',   label: 'Overcomplicated it' },
-  { id: 'avoid_start',    label: 'Avoided starting' },
-  { id: 'too_much',       label: 'Took on too much' },
-  { id: 'interrupted',    label: 'External interruption' },
-  { id: 'low_energy',     label: 'Energy crashed' },
-  { id: 'lost_motive',    label: 'Lost motivation' },
-  { id: 'unclear_next',   label: 'Unclear next step' },
-];
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -104,32 +109,51 @@ export default function ReviewScreen() {
   const setReviewDue = useAppStore((state) => state.setReviewDue);
   const prevWeekOf = usePrevWeekStart();
   const { review, weekStats, saveReview, refresh: refreshReview } = useWeeklyReview(prevWeekOf);
+  const { review: dailyReview, save: saveDailyReview } = useDailyReview();
 
   const [wins, setWins] = useState('');
-  const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
-  const [otherDrift, setOtherDrift] = useState('');
-  const [showOtherInput, setShowOtherInput] = useState(false);
+  const [whatBroke, setWhatBroke] = useState('');
   const [adjustment, setAdjustment] = useState('');
   const [nextFocus, setNextFocus] = useState('');
   const [saved, setSaved] = useState(false);
+
+  // Daily review state
+  const [dailyWins, setDailyWins] = useState('');
+  const [dailyDrift, setDailyDrift] = useState('');
+  const [dailyTomorrow, setDailyTomorrow] = useState('');
+  const [dailySaved, setDailySaved] = useState(false);
+  const [showDailyReview, setShowDailyReview] = useState(false);
+
+  useEffect(() => {
+    if (dailyReview) {
+      setDailyWins(dailyReview.wins);
+      setDailyDrift(dailyReview.drift);
+      setDailyTomorrow(dailyReview.tomorrowStep);
+      setDailySaved(true);
+    }
+  }, [dailyReview]);
+
+  const handleSaveDailyReview = useCallback(async () => {
+    await saveDailyReview(dailyWins.trim(), dailyDrift.trim(), dailyTomorrow.trim());
+    setDailySaved(true);
+    setShowDailyReview(false);
+  }, [saveDailyReview, dailyWins, dailyDrift, dailyTomorrow]);
 
   // Populate from existing review on mount / refresh
   useEffect(() => {
     if (review) {
       setWins(review.wins);
-      setSelectedReasons(review.driftReasons);
-      // If there's legacy free-text drift that isn't a chip id, show it as "other"
-      const legacyText = review.whatDrifted;
-      if (legacyText && !review.driftReasons.length) {
-        setOtherDrift(legacyText);
-        setShowOtherInput(true);
-      } else if (legacyText && !DRIFT_CHIPS.some((c) => c.id === legacyText)) {
-        setOtherDrift(legacyText);
-        setShowOtherInput(true);
-      }
+      setWhatBroke(getWhatBrokeValue(review));
       setAdjustment(review.nextWeekAdjustment);
+      setNextFocus('');
       setSaved(true);
+      return;
     }
+    setWins('');
+    setWhatBroke('');
+    setAdjustment('');
+    setNextFocus('');
+    setSaved(false);
   }, [review]);
 
   useFocusEffect(
@@ -142,26 +166,12 @@ export default function ReviewScreen() {
     }, [refreshGoals, refreshReview, setReviewDue])
   );
 
-  const toggleReason = (id: string) => {
-    setSelectedReasons((prev) =>
-      prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
-    );
-  };
-
-  const toggleOther = () => {
-    setShowOtherInput((prev) => {
-      if (prev) setOtherDrift('');
-      return !prev;
-    });
-  };
-
   const handleSave = () => {
     void (async () => {
-      const whatDrifted = otherDrift.trim();
       const didSave = await saveReview(
         wins.trim(),
-        whatDrifted,
-        selectedReasons,
+        whatBroke.trim(),
+        [],
         adjustment.trim()
       );
       if (!didSave) return;
@@ -177,8 +187,7 @@ export default function ReviewScreen() {
 
   const canSave =
     wins.trim().length > 0 ||
-    selectedReasons.length > 0 ||
-    otherDrift.trim().length > 0 ||
+    whatBroke.trim().length > 0 ||
     adjustment.trim().length > 0;
 
   const completionRate =
@@ -205,8 +214,83 @@ export default function ReviewScreen() {
           {/* ─── Header ──────────────────────────────────────── */}
           <View style={styles.header}>
             <Text style={styles.screenTitle}>Review</Text>
-            <Text style={styles.weekLabel}>Week of {formatWeekRange(prevWeekOf)}</Text>
           </View>
+
+          {/* ─── Daily Shutdown Ritual ───────────────────────── */}
+          <View style={styles.dailyCard}>
+            <View style={styles.dailyCardHeader}>
+              <View>
+                <Text style={styles.dailyCardTitle}>Daily Shutdown</Text>
+                <Text style={styles.dailyCardSub}>Today's quick reflection</Text>
+              </View>
+              {dailySaved ? (
+                <View style={styles.dailyDoneBadge}>
+                  <Text style={styles.dailyDoneText}>✓ Done</Text>
+                </View>
+              ) : null}
+            </View>
+
+            {showDailyReview ? (
+              <View style={styles.dailyForm}>
+                <Text style={styles.dailyQ}>What did you actually get done?</Text>
+                <TextInput
+                  style={styles.dailyInput}
+                  value={dailyWins}
+                  onChangeText={setDailyWins}
+                  placeholder="Even small wins count..."
+                  placeholderTextColor={C.textMuted}
+                  maxLength={140}
+                />
+                <Text style={styles.dailyQ}>What pulled you off track?</Text>
+                <TextInput
+                  style={styles.dailyInput}
+                  value={dailyDrift}
+                  onChangeText={setDailyDrift}
+                  placeholder="Be honest, not harsh..."
+                  placeholderTextColor={C.textMuted}
+                  maxLength={140}
+                />
+                <Text style={styles.dailyQ}>What's your first concrete step tomorrow?</Text>
+                <TextInput
+                  style={styles.dailyInput}
+                  value={dailyTomorrow}
+                  onChangeText={setDailyTomorrow}
+                  placeholder="Name the exact action..."
+                  placeholderTextColor={C.textMuted}
+                  maxLength={140}
+                />
+                <View style={styles.dailyActions}>
+                  <TouchableOpacity style={styles.dailyCancelBtn} onPress={() => setShowDailyReview(false)}>
+                    <Text style={styles.dailyCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.dailySaveBtn, !dailyWins.trim() && styles.dailySaveBtnDisabled]}
+                    onPress={() => void handleSaveDailyReview()}
+                    disabled={!dailyWins.trim()}
+                  >
+                    <Text style={styles.dailySaveBtnText}>Save Shutdown</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.dailyOpenBtn, dailySaved && styles.dailyOpenBtnSaved]}
+                onPress={() => setShowDailyReview(true)}
+              >
+                <Text style={[styles.dailyOpenBtnText, dailySaved && styles.dailyOpenBtnTextSaved]}>
+                  {dailySaved ? 'Edit today\'s shutdown' : 'Start daily shutdown →'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* ─── Weekly divider ──────────────────────────────── */}
+          <View style={styles.weeklyDivider}>
+            <View style={styles.weeklyDividerLine} />
+            <Text style={styles.weeklyDividerLabel}>WEEKLY REVIEW</Text>
+            <View style={styles.weeklyDividerLine} />
+          </View>
+          <Text style={styles.weekLabel}>Week of {formatWeekRange(prevWeekOf)}</Text>
 
           {/* ─── Stats ───────────────────────────────────────── */}
           <View style={styles.statsRow}>
@@ -263,43 +347,12 @@ export default function ReviewScreen() {
           <View style={styles.section}>
             <SectionLabel>2 · WHAT BROKE</SectionLabel>
             <FieldLabel>What pulled you off track?</FieldLabel>
-
-            <View style={styles.chipGrid}>
-              {DRIFT_CHIPS.map((chip) => {
-                const active = selectedReasons.includes(chip.id);
-                return (
-                  <TouchableOpacity
-                    key={chip.id}
-                    style={[styles.chip, active && styles.chipActive]}
-                    onPress={() => toggleReason(chip.id)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                      {chip.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-
-              <TouchableOpacity
-                style={[styles.chip, showOtherInput && styles.chipActive]}
-                onPress={toggleOther}
-                activeOpacity={0.75}
-              >
-                <Text style={[styles.chipText, showOtherInput && styles.chipTextActive]}>
-                  Other
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {showOtherInput ? (
-              <InlineInput
-                value={otherDrift}
-                onChangeText={setOtherDrift}
-                placeholder="Describe what happened..."
-                maxLength={200}
-              />
-            ) : null}
+            <InlineInput
+              value={whatBroke}
+              onChangeText={setWhatBroke}
+              placeholder="Describe the friction in your own words..."
+              maxLength={200}
+            />
           </View>
 
           {/* ─── 3. One adjustment ────────────────────────────── */}
@@ -359,7 +412,6 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
     marginBottom: 2,
   },
-  weekLabel: { fontSize: 14, color: C.textSecondary },
 
   // Stats
   statsRow: {
@@ -431,34 +483,60 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
 
-  // Drift chips
-  chipGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 10,
-  },
-  chip: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 20,
+  // Daily shutdown card
+  dailyCard: {
     backgroundColor: C.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: C.border,
   },
-  chipActive: {
-    backgroundColor: C.accentLight,
-    borderColor: C.accent,
-  },
-  chipText: {
+  dailyCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
+  dailyCardTitle: { fontSize: 16, fontWeight: '700', color: C.text },
+  dailyCardSub: { fontSize: 13, color: C.textSecondary, marginTop: 2 },
+  dailyDoneBadge: { backgroundColor: C.successLight, borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10 },
+  dailyDoneText: { fontSize: 12, color: C.success, fontWeight: '600' },
+  dailyForm: { gap: 10 },
+  dailyQ: { fontSize: 14, fontWeight: '600', color: C.text },
+  dailyInput: {
+    backgroundColor: C.surfaceSecondary,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     fontSize: 14,
-    color: C.textSecondary,
-    fontWeight: '500',
+    color: C.text,
   },
-  chipTextActive: {
-    color: C.accent,
-    fontWeight: '600',
+  dailyActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  dailyCancelBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: 10,
+    backgroundColor: C.surfaceSecondary, alignItems: 'center',
+    borderWidth: 1, borderColor: C.border,
   },
+  dailyCancelText: { fontSize: 14, color: C.textSecondary },
+  dailySaveBtn: {
+    flex: 2, paddingVertical: 12, borderRadius: 10,
+    backgroundColor: C.accent, alignItems: 'center',
+  },
+  dailySaveBtnDisabled: { opacity: 0.4 },
+  dailySaveBtnText: { fontSize: 14, color: '#fff', fontWeight: '600' },
+  dailyOpenBtn: {
+    backgroundColor: C.accentLight,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  dailyOpenBtnSaved: { backgroundColor: C.surfaceSecondary },
+  dailyOpenBtnText: { fontSize: 14, color: C.accent, fontWeight: '600' },
+  dailyOpenBtnTextSaved: { color: C.textSecondary },
+
+  // Weekly divider
+  weeklyDivider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  weeklyDividerLine: { flex: 1, height: 1, backgroundColor: C.border },
+  weeklyDividerLabel: { fontSize: 11, fontWeight: '700', color: C.textMuted, letterSpacing: 1 },
+  weekLabel: { fontSize: 13, color: C.textSecondary, marginBottom: 16 },
 
   // Save
   saveButton: {

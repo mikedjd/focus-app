@@ -24,7 +24,12 @@ export function useTodayTasks(goalId: string | null) {
   useEffect(() => subscribeToDataChanges(() => void refresh()), [refresh]);
 
   const addTask = useCallback(
-    async (title: string, weeklyFocusId?: string | null, nextStep?: string): Promise<TaskWriteResult> => {
+    async (
+      title: string,
+      weeklyFocusId?: string | null,
+      nextStep?: string,
+      projectId?: string | null
+    ): Promise<TaskWriteResult> => {
       if (!goalId) {
         return { ok: false, reason: 'missing_goal' };
       }
@@ -34,6 +39,7 @@ export function useTodayTasks(goalId: string | null) {
         goalId,
         weeklyFocusId,
         nextStep,
+        projectId,
       });
       await refresh();
       return result;

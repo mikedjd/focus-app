@@ -1,11 +1,14 @@
 import { Platform } from 'react-native';
 import type {
+  BrainDumpItem,
+  DailyReview,
   DailyTask,
   FocusExitReason,
   FocusSession,
   Goal,
   GoalWriteInput,
   OnboardingDraft,
+  Project,
   ResumeContext,
   TaskWriteResult,
   WeeklyFocus,
@@ -171,9 +174,19 @@ export async function createTask(input: {
   goalId: string;
   weeklyFocusId?: string | null;
   nextStep?: string;
+  projectId?: string | null;
   options?: { date?: string; sourceTaskId?: string | null };
 }): Promise<TaskWriteResult> {
-  if (IS_WEB) { const r = webDb.dbCreateTask(input); notifyDataChanged(); return r; }
+  if (IS_WEB) {
+    const r = webDb.dbCreateTask(input.title, input.goalId, input.weeklyFocusId, {
+      date: input.options?.date,
+      sourceTaskId: input.options?.sourceTaskId,
+      nextStep: input.nextStep,
+      projectId: input.projectId,
+    });
+    notifyDataChanged();
+    return r;
+  }
   const result = await rpc<TaskWriteResult>('createTask', input);
   notifyDataChanged();
   return result;
@@ -219,7 +232,11 @@ export async function saveReview(input: {
   driftReasons: string[];
   nextWeekAdjustment: string;
 }): Promise<WeeklyReview | null> {
-  if (IS_WEB) { const r = webDb.dbSaveReview(input); notifyDataChanged(); return r; }
+  if (IS_WEB) {
+    const r = webDb.dbSaveReview(input.weekOf, input.wins, input.whatDrifted, input.driftReasons, input.nextWeekAdjustment);
+    notifyDataChanged();
+    return r;
+  }
   const result = await rpc<WeeklyReview | null>('saveReview', input);
   notifyDataChanged();
   return result;
@@ -331,6 +348,86 @@ export async function refreshResumeContext(): Promise<ResumeContext | null> {
 export async function removeContext(key: string): Promise<boolean> {
   if (IS_WEB) { const r = webDb.dbRemoveContext(key); notifyDataChanged(); return r; }
   const result = await rpc<boolean>('removeContext', { key });
+  notifyDataChanged();
+  return result;
+}
+
+// ─── Projects ─────────────────────────────────────────────────────────────────
+
+export async function getProjects(goalId: string): Promise<Project[]> {
+  if (IS_WEB) return webDb.dbGetProjects(goalId);
+  return rpc('getProjects', { goalId });
+}
+
+export async function createProject(goalId: string, name: string, color: string): Promise<Project> {
+  if (IS_WEB) { const r = webDb.dbCreateProject(goalId, name, color); notifyDataChanged(); return r; }
+  const result = await rpc<Project>('createProject', { goalId, name, color });
+  notifyDataChanged();
+  return result;
+}
+
+export async function updateProject(id: string, name: string, color: string): Promise<boolean> {
+  if (IS_WEB) { const r = webDb.dbUpdateProject(id, name, color); notifyDataChanged(); return r; }
+  const result = await rpc<boolean>('updateProject', { id, name, color });
+  notifyDataChanged();
+  return result;
+}
+
+export async function deleteProject(id: string): Promise<boolean> {
+  if (IS_WEB) { const r = webDb.dbDeleteProject(id); notifyDataChanged(); return r; }
+  const result = await rpc<boolean>('deleteProject', { id });
+  notifyDataChanged();
+  return result;
+}
+
+// ─── Daily review ─────────────────────────────────────────────────────────────
+
+export async function getDailyReview(date: string): Promise<DailyReview | null> {
+  if (IS_WEB) return webDb.dbGetDailyReview(date);
+  return rpc('getDailyReview', { date });
+}
+
+export async function saveDailyReview(
+  date: string,
+  wins: string,
+  drift: string,
+  tomorrowStep: string
+): Promise<DailyReview> {
+  if (IS_WEB) { const r = webDb.dbSaveDailyReview(date, wins, drift, tomorrowStep); notifyDataChanged(); return r; }
+  const result = await rpc<DailyReview>('saveDailyReview', { date, wins, drift, tomorrowStep });
+  notifyDataChanged();
+  return result;
+}
+
+export async function isDailyReviewDue(): Promise<boolean> {
+  if (IS_WEB) return webDb.dbIsDailyReviewDue();
+  return rpc('isDailyReviewDue');
+}
+
+// ─── Brain dump ───────────────────────────────────────────────────────────────
+
+export async function getBrainDumpItems(): Promise<BrainDumpItem[]> {
+  if (IS_WEB) return webDb.dbGetBrainDumpItems();
+  return rpc('getBrainDumpItems');
+}
+
+export async function addBrainDumpItem(text: string): Promise<BrainDumpItem> {
+  if (IS_WEB) { const r = webDb.dbAddBrainDumpItem(text); notifyDataChanged(); return r; }
+  const result = await rpc<BrainDumpItem>('addBrainDumpItem', { text });
+  notifyDataChanged();
+  return result;
+}
+
+export async function deleteBrainDumpItem(id: string): Promise<boolean> {
+  if (IS_WEB) { const r = webDb.dbDeleteBrainDumpItem(id); notifyDataChanged(); return r; }
+  const result = await rpc<boolean>('deleteBrainDumpItem', { id });
+  notifyDataChanged();
+  return result;
+}
+
+export async function updateBrainDumpItem(id: string, text: string): Promise<boolean> {
+  if (IS_WEB) { const r = webDb.dbUpdateBrainDumpItem(id, text); notifyDataChanged(); return r; }
+  const result = await rpc<boolean>('updateBrainDumpItem', { id, text });
   notifyDataChanged();
   return result;
 }

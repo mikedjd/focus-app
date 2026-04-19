@@ -46,9 +46,28 @@ export interface WeeklyFocus {
   notes: string;
 }
 
+export interface Project {
+  id: string;
+  goalId: string;
+  name: string;
+  color: string;
+  sortOrder: number;
+  createdAt: number;
+}
+
+export interface DailyReview {
+  id: string;
+  date: string; // YYYY-MM-DD
+  completedAt: number;
+  wins: string;
+  drift: string;
+  tomorrowStep: string;
+}
+
 export interface DailyTask {
   id: string;
   goalId: string;
+  projectId: string | null;
   weeklyFocusId: string | null;
   sourceTaskId: string | null;
   title: string;
@@ -117,6 +136,12 @@ export interface OnboardingDraft {
   anchorWhy: string;
   anchorDrift: string;
   weeklyFocus: string;
+}
+
+export interface BrainDumpItem {
+  id: string;
+  text: string;
+  createdAt: number;
 }
 
 export type TaskWriteFailureReason =

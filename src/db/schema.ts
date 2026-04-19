@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'focus.db';
 const SCHEMA_VERSION_KEY = 'schema_version';
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 7;
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
@@ -47,6 +47,12 @@ const migrations: Migration[] = [
     version: 6,
     run: (db) => {
       ensureTaskInstructionShape(db);
+    },
+  },
+  {
+    version: 7,
+    run: (db) => {
+      ensureProjectsShape(db);
     },
   },
 ];
@@ -122,6 +128,7 @@ function runMigrations(db: SQLite.SQLiteDatabase): void {
   ensureGoalTableShape(db);
   ensureFocusSessionTableShape(db);
   ensureTaskInstructionShape(db);
+  ensureProjectsShape(db);
 
   if (getSchemaVersion(db) < CURRENT_SCHEMA_VERSION) {
     setSchemaVersion(db, CURRENT_SCHEMA_VERSION);
@@ -348,6 +355,39 @@ function ensureFocusSessionTableShape(db: SQLite.SQLiteDatabase): void {
     SET last_heartbeat_at = started_at
     WHERE last_heartbeat_at IS NULL OR last_heartbeat_at = 0
   `);
+}
+
+function ensureProjectsShape(db: SQLite.SQLiteDatabase): void {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      goal_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#3B5BDB',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (goal_id) REFERENCES goals(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_reviews (
+      id TEXT PRIMARY KEY,
+      date TEXT NOT NULL UNIQUE,
+      completed_at INTEGER NOT NULL,
+      wins TEXT NOT NULL DEFAULT '',
+      drift TEXT NOT NULL DEFAULT '',
+      tomorrow_step TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_projects_goal_id ON projects(goal_id);
+    CREATE INDEX IF NOT EXISTS idx_daily_reviews_date ON daily_reviews(date);
+  `);
+
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'project_id',
+    'ALTER TABLE daily_tasks ADD COLUMN project_id TEXT REFERENCES projects(id)'
+  );
 }
 
 function ensureColumn(
