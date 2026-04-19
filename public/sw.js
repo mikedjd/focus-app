@@ -1,52 +1,27 @@
-// Focus PWA — Service Worker
-// Strategy: cache-first for assets, network-first for navigation
-
-const CACHE = 'focus-v1';
-
-const PRECACHE = [
-  '/',
-  '/index.html',
-];
+// Legacy service worker cleanup.
+// We intentionally unregister any prior Focus service worker so GitHub Pages
+// serves the latest Expo export instead of stale cached bundles.
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(PRECACHE))
-  );
-  self.skipWaiting();
+  event.waitUntil(self.skipWaiting());
 });
+
+async function clearFocusCaches() {
+  const keys = await caches.keys();
+  await Promise.all(
+    keys
+      .filter((key) => key.startsWith('focus-'))
+      .map((key) => caches.delete(key))
+  );
+}
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    )
-  );
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', (event) => {
-  const { request } = event;
-
-  // Navigation requests — network first, fall back to cached index.html
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() => caches.match('/index.html'))
-    );
-    return;
-  }
-
-  // JS/CSS/font assets — cache first
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
-        if (!response || response.status !== 200 || response.type === 'opaque') {
-          return response;
-        }
-        const clone = response.clone();
-        caches.open(CACHE).then((cache) => cache.put(request, clone));
-        return response;
-      });
-    })
+    (async () => {
+      await clearFocusCaches();
+      await self.registration.unregister();
+      const clients = await self.clients.matchAll({ type: 'window' });
+      clients.forEach((client) => client.navigate(client.url));
+    })()
   );
 });

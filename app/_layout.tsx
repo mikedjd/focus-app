@@ -1,10 +1,12 @@
 import { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { getAppBootstrap } from '../src/api/client';
 import { C } from '../src/constants/colors';
 import { useAppStore } from '../src/store/useAppStore';
+
+const WEB_CACHE_CLEANUP_KEY = 'focus-web-cache-cleanup-v1';
 
 export default function RootLayout() {
   const appReady = useAppStore((s) => s.appReady);
@@ -38,6 +40,58 @@ export default function RootLayout() {
       cancelled = true;
     };
   }, [setAppReady, setOnboardingComplete, setResumeContext, setReviewDue]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const [hadRegistrations, hadCaches] = await Promise.all([
+          (async () => {
+            if (!('serviceWorker' in navigator)) {
+              return false;
+            }
+
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+            return registrations.length > 0;
+          })(),
+          (async () => {
+            if (typeof caches === 'undefined') {
+              return false;
+            }
+
+            const cacheKeys = await caches.keys();
+            const focusCacheKeys = cacheKeys.filter((key) => key.startsWith('focus-'));
+            await Promise.all(focusCacheKeys.map((key) => caches.delete(key)));
+            return focusCacheKeys.length > 0;
+          })(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        const needsReload = hadRegistrations || hadCaches;
+        const hasReloaded = window.sessionStorage.getItem(WEB_CACHE_CLEANUP_KEY) === 'done';
+
+        if (needsReload && !hasReloaded) {
+          window.sessionStorage.setItem(WEB_CACHE_CLEANUP_KEY, 'done');
+          window.location.reload();
+        }
+      } catch {
+        // Ignore cleanup failures and continue booting the app.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!appReady) {
     return (
