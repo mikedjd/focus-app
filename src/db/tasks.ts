@@ -1,5 +1,9 @@
 import type * as SQLite from 'expo-sqlite';
 import type { DailyTask, TaskWriteResult } from '../types';
+import {
+  STANDALONE_TASKS_GOAL_ID,
+  STANDALONE_TASKS_GOAL_TITLE,
+} from '../constants/standaloneTaskGoal';
 import { todayString } from '../utils/dates';
 import { generateId } from '../utils/ids';
 import { dbRefreshResumeContext } from './context';
@@ -85,9 +89,7 @@ export function dbCreateTask(
   }
 ): TaskWriteResult {
   return runDb('create task', { ok: false, reason: 'db_error' } as TaskWriteResult, (db) => {
-    if (!goalId) {
-      return { ok: false, reason: 'missing_goal' };
-    }
+    const resolvedGoalId = goalId || ensureStandaloneTaskGoal(db);
 
     const targetDate = options?.date ?? todayString();
     const isToday = targetDate === todayString();
@@ -97,7 +99,7 @@ export function dbCreateTask(
 
     const task: DailyTask = {
       id: generateId(),
-      goalId,
+      goalId: resolvedGoalId,
       projectId: options?.projectId ?? null,
       weeklyFocusId: weeklyFocusId ?? null,
       sourceTaskId: options?.sourceTaskId ?? null,
@@ -119,6 +121,51 @@ export function dbCreateTask(
     dbRefreshResumeContext();
     return { ok: true, task };
   });
+}
+
+function ensureStandaloneTaskGoal(
+  db: Pick<SQLite.SQLiteDatabase, 'getFirstSync' | 'runSync'>
+): string {
+  const existing = db.getFirstSync<{ id: string }>('SELECT id FROM goals WHERE id = ?', [
+    STANDALONE_TASKS_GOAL_ID,
+  ]);
+
+  if (!existing) {
+    db.runSync(
+      `INSERT INTO goals (
+        id,
+        title,
+        target_outcome,
+        target_date,
+        metric,
+        why,
+        practical_reason,
+        emotional_reason,
+        cost_of_drift,
+        anchor_why,
+        anchor_drift,
+        created_at,
+        status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        STANDALONE_TASKS_GOAL_ID,
+        STANDALONE_TASKS_GOAL_TITLE,
+        STANDALONE_TASKS_GOAL_TITLE,
+        null,
+        '',
+        'Hidden bucket for secondary tasks.',
+        '',
+        '',
+        '',
+        '',
+        '',
+        0,
+        'parked',
+      ]
+    );
+  }
+
+  return STANDALONE_TASKS_GOAL_ID;
 }
 
 export function dbCarryForwardTask(taskId: string): TaskWriteResult {

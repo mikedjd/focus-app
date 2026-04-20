@@ -1,4 +1,5 @@
 import type { Goal, OnboardingDraft } from '../types';
+import { STANDALONE_TASKS_GOAL_ID } from '../constants/standaloneTaskGoal';
 import { dbCreateGoal, dbGetCurrentWeeklyFocus, dbUpsertWeeklyFocus } from './goals';
 import { runDb } from './schema';
 import { dbGetContext, dbRemoveContext, dbSetContext } from './context';
@@ -18,7 +19,8 @@ export function dbIsOnboardingComplete(): boolean {
     }
 
     const hasExistingGoal = db.getFirstSync<{ count: number }>(
-      'SELECT COUNT(*) as count FROM goals'
+      'SELECT COUNT(*) as count FROM goals WHERE id != ?',
+      [STANDALONE_TASKS_GOAL_ID]
     )?.count;
 
     if ((hasExistingGoal ?? 0) > 0) {

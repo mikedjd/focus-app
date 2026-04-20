@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { STANDALONE_TASKS_GOAL_ID } from '../constants/standaloneTaskGoal';
 import type { DailyTask } from '../types';
 import { C } from '../constants/colors';
 
@@ -27,6 +28,7 @@ export function TaskCard({ task, isNextUp = false, onToggle, onFocus, onDrop }: 
   const translateX = useRef(new Animated.Value(0)).current;
   const dropping = useRef(false);
   const chips = [
+    task.goalId === STANDALONE_TASKS_GOAL_ID ? 'Secondary' : null,
     task.taskType === 'admin' ? 'Admin' : null,
     task.effortLevel ? task.effortLevel : null,
     task.scheduledWindowStart ? `Window ${task.scheduledWindowStart}` : null,

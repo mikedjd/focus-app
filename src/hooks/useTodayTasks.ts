@@ -30,16 +30,12 @@ export function useTodayTasks(goalId: string | null) {
       nextStep?: string,
       projectId?: string | null
     ): Promise<TaskWriteResult> => {
-      if (!goalId) {
-        return { ok: false, reason: 'missing_goal' };
-      }
-
       const result = await createTask({
         title,
-        goalId,
-        weeklyFocusId,
+        goalId: goalId ?? '',
+        weeklyFocusId: goalId ? weeklyFocusId : null,
         nextStep,
-        projectId,
+        projectId: goalId ? projectId : null,
       });
       await refresh();
       return result;

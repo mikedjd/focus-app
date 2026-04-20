@@ -33,6 +33,7 @@ import {
   todayString,
 } from '../src/utils/dates';
 import { generateAnchorLines } from '../src/utils/goalAnchors';
+import { STANDALONE_TASKS_GOAL_ID } from '../src/constants/standaloneTaskGoal';
 
 const DAILY_CAP = 3;
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -841,11 +842,16 @@ function TodayPage() {
   const [promotedTitle, setPromotedTitle] = useState<string | undefined>(undefined);
   const [brainDumpDraft, setBrainDumpDraft] = useState('');
 
-  const visibleTasks = projectFilter ? tasks.filter((task) => task.projectId === projectFilter) : tasks;
+  const mainTasks = (projectFilter ? tasks.filter((task) => task.projectId === projectFilter) : tasks).filter(
+    (task) => task.goalId !== STANDALONE_TASKS_GOAL_ID && task.taskType === 'goal'
+  );
+  const secondaryTasks = tasks.filter(
+    (task) => task.goalId === STANDALONE_TASKS_GOAL_ID || task.taskType !== 'goal'
+  );
   const doneCount = tasks.filter((task) => task.status === 'done').length;
-  const firstPending = visibleTasks.find((task) => task.status === 'pending') ?? null;
+  const firstPending = mainTasks.find((task) => task.status === 'pending') ?? null;
   const canAddTask = tasks.length < DAILY_CAP;
-  const groupedTasks = visibleTasks.reduce<Record<string, DailyTask[]>>((groups, task) => {
+  const groupedTasks = mainTasks.reduce<Record<string, DailyTask[]>>((groups, task) => {
     const key = task.projectId ?? 'none';
     groups[key] = groups[key] ?? [];
     groups[key].push(task);
@@ -866,10 +872,10 @@ function TodayPage() {
           <button
             className="primary-button"
             type="button"
-            disabled={!activeGoal || !canAddTask}
+            disabled={!canAddTask}
             onClick={() => setTaskModalOpen(true)}
           >
-            Add task
+            Add secondary task
           </button>
         </div>
       </section>
@@ -928,9 +934,7 @@ function TodayPage() {
             {weeklyFocus ? <p className="focus-line">This week: {weeklyFocus.focus}</p> : null}
           </>
         ) : (
-          <button className="primary-button" type="button" onClick={() => navigate('/goals')}>
-            Create goal
-          </button>
+          <p className="muted-copy">No active goal right now.</p>
         )}
       </section>
 
@@ -976,18 +980,18 @@ function TodayPage() {
       <section className="card">
         <div className="section-header">
           <div>
-            <p className="eyebrow">Tasks</p>
-            <h3>{visibleTasks.length === 0 ? 'Nothing queued' : 'Today’s lane'}</h3>
+            <p className="eyebrow">Main tasks</p>
+            <h3>{mainTasks.length === 0 ? 'Nothing queued' : 'Goal-linked work'}</h3>
           </div>
-          <span className="metric-chip">{tasks.length}/{DAILY_CAP} slots</span>
+          <span className="metric-chip">{mainTasks.filter((task) => task.status === 'done').length}/{mainTasks.length}</span>
         </div>
 
         {!activeGoal ? (
-          <p className="muted-copy">Set a goal to start capturing daily tasks.</p>
-        ) : visibleTasks.length === 0 ? (
-          <button className="primary-button" type="button" disabled={!canAddTask} onClick={() => setTaskModalOpen(true)}>
-            Add your first task
-          </button>
+          <p className="muted-copy">No active goal right now.</p>
+        ) : mainTasks.length === 0 ? (
+          <p className="muted-copy">
+            {projectFilter ? 'No main tasks in this project today.' : 'No main tasks queued for this goal yet.'}
+          </p>
         ) : (
           <div className="stack">
             {Object.entries(groupedTasks).map(([key, grouped]) => {
@@ -1030,7 +1034,48 @@ function TodayPage() {
       <section className="card">
         <div className="section-header">
           <div>
-            <p className="eyebrow">Brain dump</p>
+            <p className="eyebrow">Secondary tasks</p>
+            <h3>{secondaryTasks.length === 0 ? 'Life admin and loose ends' : 'Everything outside the main goal'}</h3>
+          </div>
+          <div className="inline-actions">
+            <span className="metric-chip">{secondaryTasks.filter((task) => task.status === 'done').length}/{secondaryTasks.length}</span>
+            <button className="primary-button" type="button" disabled={!canAddTask} onClick={() => setTaskModalOpen(true)}>
+              {secondaryTasks.length === 0 ? 'Add your first secondary task' : 'Add secondary task'}
+            </button>
+          </div>
+        </div>
+
+        {secondaryTasks.length === 0 ? (
+          <p className="muted-copy">Life admin and other non-goal tasks land here.</p>
+        ) : (
+          <div className="stack">
+            {secondaryTasks.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                onToggle={() =>
+                  mutate(() =>
+                    task.status === 'done'
+                      ? db.dbUncompleteTask(task.id)
+                      : db.dbCompleteTask(task.id)
+                  )
+                }
+                onFocus={() => navigate(`/focus?taskId=${task.id}`)}
+                onDrop={() => {
+                  if (window.confirm(`Drop "${task.title}"?`)) {
+                    mutate(() => db.dbDropTask(task.id));
+                  }
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Brain dump & future ideas</p>
             <h3>Capture it, then hide it</h3>
           </div>
         </div>
@@ -1095,26 +1140,24 @@ function TodayPage() {
 
       <TaskModal
         open={taskModalOpen}
-        title="Add task"
+        title="Add secondary task"
         initialTitle={promotedTitle}
-        projects={projects}
-        selectedProjectId={projectFilter}
+        projects={[]}
+        selectedProjectId={null}
         onClose={() => {
           setTaskModalOpen(false);
           setPromotedTitle(undefined);
         }}
         onSubmit={(title, nextStep, projectId) => {
           const result = mutate(() =>
-            activeGoal
-              ? db.dbCreateTask(title, activeGoal.id, weeklyFocus?.id, {
-                  nextStep,
-                  projectId,
-                })
-              : { ok: false as const, reason: 'missing_goal' as const }
+            db.dbCreateTask(title, '', null, {
+              nextStep,
+              projectId: projectId ?? null,
+            })
           );
 
           if (!result.ok) {
-            window.alert("Today's task lane is full or no goal is set.");
+            window.alert("Today's task lane is full.");
           }
         }}
       />

@@ -19,6 +19,10 @@ import type {
   WeeklyFocus,
   WeeklyReview,
 } from '../types';
+import {
+  STANDALONE_TASKS_GOAL_ID,
+  STANDALONE_TASKS_GOAL_TITLE,
+} from '../constants/standaloneTaskGoal';
 import { formatDate, getPrevWeekStart, getWeekStart, todayString } from '../utils/dates';
 import { generateAnchorLines } from '../utils/goalAnchors';
 import { generateId } from '../utils/ids';
@@ -188,6 +192,38 @@ function sortGoals(goals: Goal[]): Goal[] {
   });
 }
 
+function ensureStandaloneTaskGoal(goals: Goal[]): Goal[] {
+  if (goals.some((goal) => goal.id === STANDALONE_TASKS_GOAL_ID)) {
+    return goals;
+  }
+
+  return [
+    ...goals,
+    {
+      id: STANDALONE_TASKS_GOAL_ID,
+      title: STANDALONE_TASKS_GOAL_TITLE,
+      targetOutcome: STANDALONE_TASKS_GOAL_TITLE,
+      targetDate: null,
+      metric: '',
+      why: '',
+      practicalReason: '',
+      emotionalReason: '',
+      costOfDrift: '',
+      anchorWhy: '',
+      anchorDrift: '',
+      importance: 1,
+      urgency: 1,
+      payoff: 1,
+      whyNow: '',
+      createdAt: 0,
+      status: 'parked',
+      currentFrictionMinutes: 2,
+      weeklySeatedSeconds: 0,
+      weeklySeatedWeekOf: '',
+    },
+  ];
+}
+
 // ─── Goal functions ───────────────────────────────────────────────────────────
 
 export function dbGetActiveGoal(): Goal | null {
@@ -195,7 +231,7 @@ export function dbGetActiveGoal(): Goal | null {
 }
 
 export function dbGetGoals(): Goal[] {
-  return sortGoals(getGoalsStore());
+  return sortGoals(getGoalsStore()).filter((goal) => goal.id !== STANDALONE_TASKS_GOAL_ID);
 }
 
 export function dbCreateGoal(
@@ -345,8 +381,11 @@ export function dbCreateTask(
     scheduledWindowStart?: string;
   }
 ): TaskWriteResult {
-  if (!goalId) return { ok: false, reason: 'missing_goal' };
+  if (!goalId) {
+    save(KEY_GOALS, ensureStandaloneTaskGoal(getGoalsStore()));
+  }
   const tasks = load<DailyTask>(KEY_TASKS);
+  const resolvedGoalId = goalId || STANDALONE_TASKS_GOAL_ID;
   const targetDate = options?.date ?? todayString();
   const isToday = targetDate === todayString();
   if (isToday && getActiveTasks(tasks, targetDate).length >= DAILY_TASK_CAP) {
@@ -354,7 +393,7 @@ export function dbCreateTask(
   }
   const task: DailyTask = {
     id: generateId(),
-    goalId,
+    goalId: resolvedGoalId,
     projectId: options?.projectId ?? null,
     weeklyFocusId: weeklyFocusId ?? null,
     sourceTaskId: options?.sourceTaskId ?? null,
@@ -675,7 +714,7 @@ const ONBOARDING_DRAFT_KEY = 'onboarding_draft';
 export function dbIsOnboardingComplete(): boolean {
   if (ctxGet(ONBOARDING_COMPLETE_KEY) === '1') return true;
   // Also true if any goal exists (migrated user)
-  return load<Goal>(KEY_GOALS).length > 0;
+  return load<Goal>(KEY_GOALS).some((goal) => goal.id !== STANDALONE_TASKS_GOAL_ID);
 }
 
 export function dbGetOnboardingDraft(): import('../types').OnboardingDraft | null {

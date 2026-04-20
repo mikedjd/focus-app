@@ -16,6 +16,7 @@ import { NextUpPrompt } from '../../src/components/today/NextUpPrompt';
 import { ProjectSidebar } from '../../src/components/today/ProjectSidebar';
 import { ReEntryCard } from '../../src/components/today/ReEntryCard';
 import { TaskList } from '../../src/components/today/TaskList';
+import { STANDALONE_TASKS_GOAL_ID } from '../../src/constants/standaloneTaskGoal';
 import { C } from '../../src/constants/colors';
 import { useGoals } from '../../src/hooks/useGoals';
 import { useBrainDump } from '../../src/hooks/useBrainDump';
@@ -37,7 +38,6 @@ export default function TodayScreen() {
     uncompleteTask,
     dropTask,
     canAddMore,
-    doneCount,
     refresh: refreshTasks,
   } = useTodayTasks(activeGoal?.id ?? null);
 
@@ -153,7 +153,15 @@ export default function TodayScreen() {
     return counts;
   }, [tasks]);
 
-  const firstPendingTask = tasks.find((t) => t.status === 'pending') ?? null;
+  const mainTasks = useMemo(
+    () => tasks.filter((task) => task.goalId !== STANDALONE_TASKS_GOAL_ID && task.taskType === 'goal'),
+    [tasks]
+  );
+  const secondaryTasks = useMemo(
+    () => tasks.filter((task) => task.goalId === STANDALONE_TASKS_GOAL_ID || task.taskType !== 'goal'),
+    [tasks]
+  );
+  const firstPendingTask = mainTasks.find((t) => t.status === 'pending') ?? null;
   const showNextUpPrompt = !!activeGoal && !!firstPendingTask && !promptDismissed && !resumeContext;
 
   return (
@@ -237,17 +245,33 @@ export default function TodayScreen() {
         />
 
         <TaskList
-          tasks={tasks}
-          activeGoal={activeGoal}
+          title="Main Tasks"
+          tasks={mainTasks}
           projects={projects}
-          doneCount={doneCount}
-          canAddMore={canAddMore}
+          doneCount={mainTasks.filter((task) => task.status === 'done').length}
+          canAddMore={false}
           activeProjectFilter={activeProjectFilter}
+          emptyStateText={activeGoal ? 'No main tasks queued for this goal yet.' : 'No active goal right now.'}
+          showAddButton={false}
+          onToggleTask={handleToggle}
+          onFocusTask={handleFocus}
+          onDropTask={handleDrop}
+          onPressAddTask={() => {}}
+        />
+
+        <TaskList
+          title="Secondary Tasks"
+          tasks={secondaryTasks}
+          projects={[]}
+          doneCount={secondaryTasks.filter((task) => task.status === 'done').length}
+          canAddMore={canAddMore}
+          activeProjectFilter={null}
+          emptyStateText="Life admin and other non-goal tasks go here."
+          firstAddLabel="+ Add your first secondary task"
           onToggleTask={handleToggle}
           onFocusTask={handleFocus}
           onDropTask={handleDrop}
           onPressAddTask={() => setShowAddSheet(true)}
-          onPressSetGoal={() => router.push('/(tabs)/goals')}
         />
 
         <BrainDumpCard
@@ -260,12 +284,12 @@ export default function TodayScreen() {
 
       <AddTaskSheet
         visible={showAddSheet}
-        activeGoalTitle={activeGoal?.title}
-        projects={projects}
-        selectedProjectId={activeProjectFilter}
+        activeGoalTitle={undefined}
+        projects={[]}
+        selectedProjectId={null}
         initialTitle={promoteText ?? undefined}
         onClose={() => { setShowAddSheet(false); setPromoteText(null); }}
-        onSubmit={handleAddTask}
+        onSubmit={(title, nextStep) => handleAddTask(title, null, nextStep, null)}
       />
     </SafeAreaView>
   );

@@ -54,7 +54,7 @@ export function BrainDumpCard({ items, onCapture, onDelete, onPromoteToTask }: P
         <View style={styles.headerLeft}>
           <Text style={styles.icon}>⚡</Text>
           <View>
-            <Text style={styles.title}>Brain Dump</Text>
+            <Text style={styles.title}>Brain Dump & Future Ideas</Text>
             <Text style={styles.subtitle}>
               {items.length === 0 ? 'Capture ideas without losing focus' : `${items.length} idea${items.length === 1 ? '' : 's'} parked`}
             </Text>

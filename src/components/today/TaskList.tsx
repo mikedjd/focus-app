@@ -1,47 +1,40 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { EmptyState } from '../EmptyState';
 import { TaskCard } from '../TaskCard';
 import { C } from '../../constants/colors';
-import type { DailyTask, Goal, Project } from '../../types';
+import type { DailyTask, Project } from '../../types';
 
 interface Props {
+  title: string;
   tasks: DailyTask[];
-  activeGoal: Goal | null;
   projects: Project[];
   doneCount: number;
   canAddMore: boolean;
   activeProjectFilter: string | null;
+  emptyStateText: string;
+  showAddButton?: boolean;
+  firstAddLabel?: string;
   onToggleTask: (taskId: string) => void;
   onFocusTask: (taskId: string) => void;
   onDropTask: (taskId: string) => void;
   onPressAddTask: () => void;
-  onPressSetGoal: () => void;
 }
 
 export function TaskList({
+  title,
   tasks,
-  activeGoal,
   projects,
   doneCount,
   canAddMore,
   activeProjectFilter,
+  emptyStateText,
+  showAddButton = true,
+  firstAddLabel = '+ Add task',
   onToggleTask,
   onFocusTask,
   onDropTask,
   onPressAddTask,
-  onPressSetGoal,
 }: Props) {
-  if (!activeGoal) {
-    return (
-      <EmptyState
-        title="Set a goal to start"
-        subtitle="Your goal anchors everything. Set one, then add up to 3 daily tasks."
-        action={{ label: 'Set a Goal', onPress: onPressSetGoal }}
-      />
-    );
-  }
-
   const visibleTasks = activeProjectFilter
     ? tasks.filter((t) => t.projectId === activeProjectFilter)
     : tasks;
@@ -76,11 +69,7 @@ export function TaskList({
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>
-          {activeProjectFilter
-            ? (projectMap.get(activeProjectFilter)?.name ?? 'Tasks')
-            : 'Tasks'}
-        </Text>
+        <Text style={styles.sectionTitle}>{title}</Text>
         {tasks.length > 0 ? (
           <Text style={styles.taskCounter}>{doneCount}/{tasks.length}</Text>
         ) : null}
@@ -92,11 +81,15 @@ export function TaskList({
         </View>
       ) : null}
 
-      {visibleTasks.length === 0 && tasks.length === 0 ? (
+      {visibleTasks.length === 0 && tasks.length === 0 && showAddButton ? (
         <TouchableOpacity style={styles.firstTaskButton} onPress={onPressAddTask} activeOpacity={0.7}>
-          <Text style={styles.firstTaskButtonText}>+ Add your first task</Text>
+          <Text style={styles.firstTaskButtonText}>{firstAddLabel}</Text>
           <Text style={styles.firstTaskHint}>up to 3 · concrete actions only</Text>
         </TouchableOpacity>
+      ) : visibleTasks.length === 0 && tasks.length === 0 ? (
+        <View style={styles.emptyFilter}>
+          <Text style={styles.emptyFilterText}>{emptyStateText}</Text>
+        </View>
       ) : visibleTasks.length === 0 ? (
         <View style={styles.emptyFilter}>
           <Text style={styles.emptyFilterText}>No tasks in this project today</Text>
@@ -124,7 +117,7 @@ export function TaskList({
         </View>
       ))}
 
-      {canAddMore && tasks.length > 0 ? (
+      {showAddButton && canAddMore && tasks.length > 0 ? (
         <TouchableOpacity style={styles.addButton} onPress={onPressAddTask} activeOpacity={0.7}>
           <Text style={styles.addButtonText}>+ Add task</Text>
         </TouchableOpacity>

@@ -46,17 +46,15 @@ export function AddTaskSheet({ visible, activeGoalTitle, projects, selectedProje
       setErrorMessage("Today's 3-task limit is already full.");
       return;
     }
-    if (result.reason === 'missing_goal') {
-      setErrorMessage('Set a goal before adding tasks.');
-      return;
-    }
     setErrorMessage('Task could not be saved right now.');
   };
 
   return (
     <BottomSheetModal visible={visible} onClose={onClose}>
       <Text style={styles.title}>What needs doing?</Text>
-      {activeGoalTitle ? <Text style={styles.goalHint}>Links to: {activeGoalTitle}</Text> : null}
+      <Text style={styles.goalHint}>
+        {activeGoalTitle ? `Main goal: ${activeGoalTitle}` : 'Adds to Secondary Tasks'}
+      </Text>
 
       <TextInput
         style={styles.input}
