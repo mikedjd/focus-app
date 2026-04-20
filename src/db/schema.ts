@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'focus.db';
 const SCHEMA_VERSION_KEY = 'schema_version';
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
@@ -53,6 +53,12 @@ const migrations: Migration[] = [
     version: 7,
     run: (db) => {
       ensureProjectsShape(db);
+    },
+  },
+  {
+    version: 8,
+    run: (db) => {
+      ensureControlCenterShape(db);
     },
   },
 ];
@@ -129,6 +135,7 @@ function runMigrations(db: SQLite.SQLiteDatabase): void {
   ensureFocusSessionTableShape(db);
   ensureTaskInstructionShape(db);
   ensureProjectsShape(db);
+  ensureControlCenterShape(db);
 
   if (getSchemaVersion(db) < CURRENT_SCHEMA_VERSION) {
     setSchemaVersion(db, CURRENT_SCHEMA_VERSION);
@@ -387,6 +394,103 @@ function ensureProjectsShape(db: SQLite.SQLiteDatabase): void {
     'daily_tasks',
     'project_id',
     'ALTER TABLE daily_tasks ADD COLUMN project_id TEXT REFERENCES projects(id)'
+  );
+}
+
+function ensureControlCenterShape(db: SQLite.SQLiteDatabase): void {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS milestones (
+      id TEXT PRIMARY KEY,
+      goal_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      target_metric TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      completed_at INTEGER,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (goal_id) REFERENCES goals(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_milestones_goal_sort
+      ON milestones(goal_id, sort_order);
+
+    CREATE TABLE IF NOT EXISTS energy_windows (
+      id TEXT PRIMARY KEY,
+      day_of_week INTEGER NOT NULL,
+      start_hour INTEGER NOT NULL,
+      end_hour INTEGER NOT NULL,
+      intensity TEXT NOT NULL DEFAULT 'medium',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_energy_windows_day
+      ON energy_windows(day_of_week);
+
+    CREATE TABLE IF NOT EXISTS parking_lot (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      why TEXT NOT NULL DEFAULT '',
+      diverted_at INTEGER NOT NULL,
+      promotable_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'parked'
+    );
+
+    CREATE TABLE IF NOT EXISTS inbox_items (
+      id TEXT PRIMARY KEY,
+      raw_text TEXT NOT NULL,
+      classified_as TEXT,
+      target_id TEXT,
+      scheduled_for TEXT,
+      effort_level TEXT,
+      created_at INTEGER NOT NULL,
+      resolved_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_inbox_items_resolved
+      ON inbox_items(resolved_at, created_at DESC);
+  `);
+
+  ensureColumn(
+    db,
+    'goals',
+    'current_friction_minutes',
+    'ALTER TABLE goals ADD COLUMN current_friction_minutes INTEGER NOT NULL DEFAULT 2'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'weekly_seated_seconds',
+    'ALTER TABLE goals ADD COLUMN weekly_seated_seconds INTEGER NOT NULL DEFAULT 0'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'weekly_seated_week_of',
+    "ALTER TABLE goals ADD COLUMN weekly_seated_week_of TEXT NOT NULL DEFAULT ''"
+  );
+
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'task_type',
+    "ALTER TABLE daily_tasks ADD COLUMN task_type TEXT NOT NULL DEFAULT 'goal'"
+  );
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'effort_level',
+    "ALTER TABLE daily_tasks ADD COLUMN effort_level TEXT NOT NULL DEFAULT ''"
+  );
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'milestone_id',
+    'ALTER TABLE daily_tasks ADD COLUMN milestone_id TEXT'
+  );
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'scheduled_window_start',
+    "ALTER TABLE daily_tasks ADD COLUMN scheduled_window_start TEXT NOT NULL DEFAULT ''"
   );
 }
 

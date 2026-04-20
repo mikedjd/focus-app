@@ -142,6 +142,9 @@ function normalizeStoredGoal(goal: Goal | (Partial<Goal> & { id: string; title: 
       status === 'active' || status === 'queued' || status === 'parked' || status === 'completed'
         ? status
         : 'parked',
+    currentFrictionMinutes: (goal as Goal).currentFrictionMinutes ?? 2,
+    weeklySeatedSeconds: (goal as Goal).weeklySeatedSeconds ?? 0,
+    weeklySeatedWeekOf: (goal as Goal).weeklySeatedWeekOf ?? '',
   };
 }
 
@@ -220,6 +223,9 @@ export function dbCreateGoal(
     whyNow: n.whyNow,
     createdAt: Date.now(),
     status: nextStatus,
+    currentFrictionMinutes: 2,
+    weeklySeatedSeconds: 0,
+    weeklySeatedWeekOf: '',
   };
   const updatedGoals =
     nextStatus === 'active'
@@ -328,7 +334,16 @@ export function dbCreateTask(
   title: string,
   goalId: string,
   weeklyFocusId?: string | null,
-  options?: { date?: string; sourceTaskId?: string | null; nextStep?: string; projectId?: string | null }
+  options?: {
+    date?: string;
+    sourceTaskId?: string | null;
+    nextStep?: string;
+    projectId?: string | null;
+    taskType?: DailyTask['taskType'];
+    effortLevel?: DailyTask['effortLevel'];
+    milestoneId?: string | null;
+    scheduledWindowStart?: string;
+  }
 ): TaskWriteResult {
   if (!goalId) return { ok: false, reason: 'missing_goal' };
   const tasks = load<DailyTask>(KEY_TASKS);
@@ -350,6 +365,10 @@ export function dbCreateTask(
     completedAt: null,
     sortOrder: getActiveTasks(tasks, targetDate).length,
     createdAt: Date.now(),
+    taskType: options?.taskType ?? 'goal',
+    effortLevel: options?.effortLevel ?? '',
+    milestoneId: options?.milestoneId ?? null,
+    scheduledWindowStart: options?.scheduledWindowStart ?? '',
   };
   save(KEY_TASKS, [...tasks, task]);
   webRefreshResumeContext();
@@ -377,6 +396,10 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
     completedAt: null,
     sortOrder: getActiveTasks(tasks, targetDate).length,
     createdAt: Date.now(),
+    taskType: source.taskType ?? 'goal',
+    effortLevel: source.effortLevel ?? '',
+    milestoneId: source.milestoneId ?? null,
+    scheduledWindowStart: source.scheduledWindowStart ?? '',
   };
   save(KEY_TASKS, [...tasks, task]);
   webRefreshResumeContext();

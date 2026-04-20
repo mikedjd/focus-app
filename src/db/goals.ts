@@ -18,6 +18,9 @@ type GoalRow = {
   anchor_drift: string;
   created_at: number;
   status: string;
+  current_friction_minutes?: number | null;
+  weekly_seated_seconds?: number | null;
+  weekly_seated_week_of?: string | null;
 };
 
 type WeeklyFocusRow = {
@@ -56,6 +59,13 @@ function mapGoal(row: GoalRow): Goal {
     anchorDrift: row.anchor_drift || '',
     createdAt: row.created_at,
     status: row.status as Goal['status'],
+    importance: 0,
+    urgency: 0,
+    payoff: 0,
+    whyNow: '',
+    currentFrictionMinutes: row.current_friction_minutes ?? 2,
+    weeklySeatedSeconds: row.weekly_seated_seconds ?? 0,
+    weeklySeatedWeekOf: row.weekly_seated_week_of ?? '',
   };
 }
 
@@ -123,8 +133,15 @@ export function dbCreateGoal(input: GoalWriteInput): Goal | null {
       costOfDrift: normalized.costOfDrift || '',
       anchorWhy: normalized.anchorWhy || '',
       anchorDrift: normalized.anchorDrift || '',
+      importance: 0,
+      urgency: 0,
+      payoff: 0,
+      whyNow: '',
       createdAt: Date.now(),
       status: 'active',
+      currentFrictionMinutes: 2,
+      weeklySeatedSeconds: 0,
+      weeklySeatedWeekOf: '',
     };
 
     db.runSync(

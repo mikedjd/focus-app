@@ -3,22 +3,28 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { dismissResumeContext, isReviewDue, refreshResumeContext } from '../../src/api/client';
+import {
+  dismissResumeContext,
+  getTaskById,
+  isReviewDue,
+  refreshResumeContext,
+} from '../../src/api/client';
 import { AddTaskSheet } from '../../src/components/today/AddTaskSheet';
 import { BrainDumpCard } from '../../src/components/today/BrainDumpCard';
 import { GoalAnchorCard } from '../../src/components/today/GoalAnchorCard';
 import { NextUpPrompt } from '../../src/components/today/NextUpPrompt';
 import { ProjectSidebar } from '../../src/components/today/ProjectSidebar';
-import { ResumeContextBanner } from '../../src/components/today/ResumeContextBanner';
+import { ReEntryCard } from '../../src/components/today/ReEntryCard';
 import { TaskList } from '../../src/components/today/TaskList';
 import { C } from '../../src/constants/colors';
 import { useGoals } from '../../src/hooks/useGoals';
 import { useBrainDump } from '../../src/hooks/useBrainDump';
+import { useInbox } from '../../src/hooks/useInbox';
 import { useProjects } from '../../src/hooks/useProjects';
 import { useTodayTasks } from '../../src/hooks/useTodayTasks';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatDisplayDate } from '../../src/utils/dates';
-import type { BrainDumpItem, ResumeContext } from '../../src/types';
+import type { BrainDumpItem, DailyTask, ResumeContext } from '../../src/types';
 
 export default function TodayScreen() {
   const router = useRouter();
@@ -37,6 +43,7 @@ export default function TodayScreen() {
 
   const { projects, addProject, removeProject } = useProjects(activeGoal?.id ?? null);
   const { items: brainDumpItems, capture: captureBrainDump, remove: removeBrainDumpItem } = useBrainDump();
+  const { pendingCount: inboxCount } = useInbox(activeGoal?.id ?? null);
 
   const resumeContext = useAppStore((state) => state.resumeContext);
   const setResumeContext = useAppStore((state) => state.setResumeContext);
@@ -47,6 +54,7 @@ export default function TodayScreen() {
   const [activeProjectFilter, setActiveProjectFilter] = useState<string | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [promptDismissed, setPromptDismissed] = useState(false);
+  const [resumeTask, setResumeTask] = useState<DailyTask | null>(null);
 
   const refreshScreen = useCallback(() => {
     void refreshGoals();
@@ -63,6 +71,16 @@ export default function TodayScreen() {
       setPromptDismissed(false);
     }, [refreshScreen])
   );
+
+  React.useEffect(() => {
+    if (!resumeContext) {
+      setResumeTask(null);
+      return;
+    }
+    void (async () => {
+      setResumeTask(await getTaskById(resumeContext.taskId));
+    })();
+  }, [resumeContext, tasks]);
 
   const handleToggle = useCallback(
     (taskId: string) => {
@@ -183,11 +201,21 @@ export default function TodayScreen() {
               </Text>
             </TouchableOpacity>
           ) : null}
+          <TouchableOpacity
+            style={styles.inboxChip}
+            onPress={() => router.push('/inbox')}
+            hitSlop={8}
+          >
+            <Text style={styles.inboxChipText}>
+              Inbox{inboxCount > 0 ? ` (${inboxCount})` : ''}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {resumeContext ? (
-          <ResumeContextBanner
+          <ReEntryCard
             resumeContext={resumeContext}
+            resumeTask={resumeTask}
             onPrimaryAction={handleResumePrimaryAction}
             onDismiss={handleDismissResume}
             errorMessage={resumeError}
@@ -260,6 +288,18 @@ const styles = StyleSheet.create({
   headerText: { flex: 1 },
   screenTitle: { fontSize: 28, fontWeight: '700', color: C.text, letterSpacing: -0.5, marginBottom: 2 },
   date: { fontSize: 14, color: C.textSecondary },
+  inboxChip: {
+    backgroundColor: C.surfaceSecondary,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    alignSelf: 'flex-start',
+  },
+  inboxChipText: {
+    color: C.accent,
+    fontWeight: '600',
+    fontSize: 12,
+  },
   filterChip: {
     backgroundColor: C.accentLight,
     borderRadius: 16,

@@ -1,5 +1,16 @@
 export type GoalStatus = 'active' | 'queued' | 'parked' | 'completed';
 export type TaskStatus = 'pending' | 'done' | 'dropped';
+export type TaskType = 'goal' | 'admin';
+export type EffortLevel = '' | 'light' | 'medium' | 'challenging';
+export type EnergyIntensity = 'low' | 'medium' | 'high';
+export type InboxClassification =
+  | 'today_task'
+  | 'admin'
+  | 'milestone'
+  | 'parking_lot'
+  | 'someday'
+  | 'unknown';
+export type ParkingStatus = 'parked' | 'promoted' | 'dismissed';
 export type FocusSessionStatus = 'active' | 'completed' | 'abandoned';
 export type FocusExitReason =
   | 'distraction'
@@ -44,6 +55,56 @@ export interface Goal {
   whyNow: string;
   createdAt: number;
   status: GoalStatus;
+  currentFrictionMinutes: number;
+  weeklySeatedSeconds: number;
+  weeklySeatedWeekOf: string;
+}
+
+export interface Milestone {
+  id: string;
+  goalId: string;
+  title: string;
+  targetMetric: string;
+  sortOrder: number;
+  completedAt: number | null;
+  createdAt: number;
+}
+
+export interface GoalProgress {
+  goalId: string;
+  totalMilestones: number;
+  completedMilestones: number;
+  percent: number; // 0..1
+  nextMilestone: Milestone | null;
+}
+
+export interface EnergyWindow {
+  id: string;
+  dayOfWeek: number; // 0=Sun..6=Sat
+  startHour: number; // 0..23
+  endHour: number; // 1..24
+  intensity: EnergyIntensity;
+  createdAt: number;
+}
+
+export interface ParkingLotItem {
+  id: string;
+  title: string;
+  why: string;
+  divertedAt: number;
+  promotableAt: number;
+  status: ParkingStatus;
+}
+
+export interface InboxItem {
+  id: string;
+  rawText: string;
+  classifiedAs: InboxClassification | null;
+  targetId: string | null;
+  scheduledFor: string | null;
+  effortLevel: EffortLevel;
+  createdAt: number;
+  resolvedAt: number | null;
 }
 
 export interface WeeklyFocus {
@@ -85,6 +146,10 @@ export interface DailyTask {
   completedAt: number | null;
   sortOrder: number;
   createdAt: number;
+  taskType: TaskType;
+  effortLevel: EffortLevel;
+  milestoneId: string | null;
+  scheduledWindowStart: string;
 }
 
 export interface FocusSession {

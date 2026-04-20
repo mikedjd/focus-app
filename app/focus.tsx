@@ -19,6 +19,7 @@ import { BottomSheetModal } from '../src/components/BottomSheetModal';
 import { C } from '../src/constants/colors';
 import type { FocusExitReason, FocusSession, DailyTask, Goal } from '../src/types';
 import { formatElapsed } from '../src/utils/dates';
+import { dbRecomputeGoalFriction } from '../src/db';
 
 const BG = '#12121A';
 const TEXT_DIM = 'rgba(255,255,255,0.45)';
@@ -130,12 +131,19 @@ export default function FocusScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const completedSession = await completeFocusSession(session.id);
       await completeTask(taskId);
+      if (goal?.id) {
+        try {
+          dbRecomputeGoalFriction(goal.id);
+        } catch {
+          /* native-only; ignore on web */
+        }
+      }
       setSession(completedSession);
       setElapsed(completedSession?.durationSeconds ?? elapsed);
       setDone(true);
       setTimeout(() => router.replace('/(tabs)'), 900);
     })();
-  }, [elapsed, router, session, taskId]);
+  }, [elapsed, goal?.id, router, session, taskId]);
 
   const handleRequestExit = useCallback(() => {
     setSelectedExitReason(null);
@@ -226,6 +234,11 @@ export default function FocusScreen() {
             <Text style={styles.focusLabel}>Focus</Text>
             <Text style={styles.taskTitle}>{task.title}</Text>
             <Text style={styles.helperText}>{helperText}</Text>
+            {goal ? (
+              <Text style={styles.frictionHint}>
+                Aim for {goal.currentFrictionMinutes} min. Stay past it and watch your floor rise.
+              </Text>
+            ) : null}
 
             {goal ? (
               <View style={styles.goalLink}>
@@ -376,6 +389,12 @@ const styles = StyleSheet.create({
     color: TEXT_MID,
     lineHeight: 24,
     marginBottom: 22,
+  },
+  frictionHint: {
+    fontSize: 13,
+    color: TEXT_DIM,
+    lineHeight: 18,
+    marginBottom: 18,
   },
   goalLink: {
     flexDirection: 'row',
