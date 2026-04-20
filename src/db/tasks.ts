@@ -1,9 +1,16 @@
 import type * as SQLite from 'expo-sqlite';
-import type { DailyTask, TaskWriteResult } from '../types';
+import type { DailyTask, DailyPhaseId, TaskWriteResult } from '../types';
 import {
   STANDALONE_TASKS_GOAL_ID,
   STANDALONE_TASKS_GOAL_TITLE,
 } from '../constants/standaloneTaskGoal';
+import {
+  clampBreakMinutes,
+  clampDurationMinutes,
+  DEFAULT_BREAK_MINUTES,
+  DEFAULT_FOCUS_MINUTES,
+  getDefaultPhaseId,
+} from '../utils/dailyPhases';
 import { todayString } from '../utils/dates';
 import { generateId } from '../utils/ids';
 import { dbRefreshResumeContext } from './context';
@@ -28,6 +35,9 @@ type DailyTaskRow = {
   effort_level?: string | null;
   milestone_id?: string | null;
   scheduled_window_start?: string | null;
+  phase_id?: string | null;
+  focus_duration_minutes?: number | null;
+  break_duration_minutes?: number | null;
 };
 
 function mapTask(row: DailyTaskRow): DailyTask {
@@ -48,7 +58,32 @@ function mapTask(row: DailyTaskRow): DailyTask {
     effortLevel: (row.effort_level as DailyTask['effortLevel']) ?? '',
     milestoneId: row.milestone_id ?? null,
     scheduledWindowStart: row.scheduled_window_start ?? '',
+    phaseId: normalizePhaseId(row.phase_id, ((row.task_type as DailyTask['taskType']) ?? 'goal') || 'goal', (row.effort_level as DailyTask['effortLevel']) ?? ''),
+    focusDurationMinutes: clampDurationMinutes(row.focus_duration_minutes ?? DEFAULT_FOCUS_MINUTES, DEFAULT_FOCUS_MINUTES),
+    breakDurationMinutes: clampBreakMinutes(row.break_duration_minutes ?? DEFAULT_BREAK_MINUTES, DEFAULT_BREAK_MINUTES),
   };
+}
+
+function normalizePhaseId(
+  phaseId: string | null | undefined,
+  taskType: DailyTask['taskType'],
+  effortLevel: DailyTask['effortLevel']
+): DailyPhaseId {
+  if (phaseId === 'phase1' || phaseId === 'phase2' || phaseId === 'phase3') {
+    return phaseId;
+  }
+
+  return getDefaultPhaseId(taskType, effortLevel);
+}
+
+function getStoredDefaultNumber(
+  db: Pick<SQLite.SQLiteDatabase, 'getFirstSync'>,
+  key: string,
+  fallback: number,
+  clamp: (value: number, fallback: number) => number
+): number {
+  const row = db.getFirstSync<{ value: string }>('SELECT value FROM app_context WHERE key = ?', [key]);
+  return clamp(Number(row?.value ?? ''), fallback);
 }
 
 export function dbGetTodayTasks(): DailyTask[] {
@@ -86,6 +121,9 @@ export function dbCreateTask(
     effortLevel?: DailyTask['effortLevel'];
     milestoneId?: string | null;
     scheduledWindowStart?: string;
+    phaseId?: DailyPhaseId;
+    focusDurationMinutes?: number;
+    breakDurationMinutes?: number;
   }
 ): TaskWriteResult {
   return runDb('create task', { ok: false, reason: 'db_error' } as TaskWriteResult, (db) => {
@@ -95,6 +133,48 @@ export function dbCreateTask(
     const isToday = targetDate === todayString();
     if (isToday && getTaskCountForDate(db, targetDate) >= DAILY_TASK_CAP) {
       return { ok: false, reason: 'task_limit_reached' };
+    }
+
+    const taskType = options?.taskType ?? 'goal';
+    const effortLevel = options?.effortLevel ?? '';
+    const phaseId = options?.phaseId ?? getDefaultPhaseId(taskType, effortLevel);
+    const defaultFocusMinutes = getStoredDefaultNumber(
+      db,
+      'daily_rhythm_focus_minutes',
+      DEFAULT_FOCUS_MINUTES,
+      clampDurationMinutes
+    );
+    const defaultBreakMinutes = getStoredDefaultNumber(
+      db,
+      'daily_rhythm_break_minutes',
+      DEFAULT_BREAK_MINUTES,
+      clampBreakMinutes
+    );
+
+    // Auto-slot admin tasks into the matching energy window when none is specified
+    let scheduledWindowStart = options?.scheduledWindowStart ?? '';
+    if (taskType === 'admin' && effortLevel && !scheduledWindowStart && hasColumn(db, 'energy_windows', 'intensity')) {
+      const EFFORT_TO_INTENSITY: Record<string, string> = {
+        light: 'low',
+        medium: 'medium',
+        challenging: 'high',
+      };
+      const desired = EFFORT_TO_INTENSITY[effortLevel] ?? 'low';
+      const now = new Date();
+      const dayOfWeek = now.getDay();
+      const currentHour = now.getHours();
+      const windowRow =
+        db.getFirstSync<{ start_hour: number }>(
+          `SELECT start_hour FROM energy_windows WHERE day_of_week = ? AND intensity = ? AND start_hour >= ? ORDER BY start_hour LIMIT 1`,
+          [dayOfWeek, desired, currentHour]
+        ) ??
+        db.getFirstSync<{ start_hour: number }>(
+          `SELECT start_hour FROM energy_windows WHERE day_of_week = ? AND intensity = ? ORDER BY start_hour LIMIT 1`,
+          [dayOfWeek, desired]
+        );
+      if (windowRow) {
+        scheduledWindowStart = `${String(windowRow.start_hour).padStart(2, '0')}:00`;
+      }
     }
 
     const task: DailyTask = {
@@ -110,10 +190,13 @@ export function dbCreateTask(
       completedAt: null,
       sortOrder: getTaskCountForDate(db, targetDate),
       createdAt: Date.now(),
-      taskType: options?.taskType ?? 'goal',
-      effortLevel: options?.effortLevel ?? '',
+      taskType,
+      effortLevel,
       milestoneId: options?.milestoneId ?? null,
-      scheduledWindowStart: options?.scheduledWindowStart ?? '',
+      scheduledWindowStart,
+      phaseId,
+      focusDurationMinutes: clampDurationMinutes(options?.focusDurationMinutes ?? defaultFocusMinutes, defaultFocusMinutes),
+      breakDurationMinutes: clampBreakMinutes(options?.breakDurationMinutes ?? defaultBreakMinutes, defaultBreakMinutes),
     };
 
     insertTaskRow(db, task);
@@ -204,6 +287,19 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
         effortLevel: (sourceRow.effort_level as DailyTask['effortLevel']) ?? '',
         milestoneId: sourceRow.milestone_id ?? null,
         scheduledWindowStart: sourceRow.scheduled_window_start ?? '',
+        phaseId: normalizePhaseId(
+          sourceRow.phase_id,
+          ((sourceRow.task_type as DailyTask['taskType']) ?? 'goal') || 'goal',
+          (sourceRow.effort_level as DailyTask['effortLevel']) ?? ''
+        ),
+        focusDurationMinutes: clampDurationMinutes(
+          sourceRow.focus_duration_minutes ?? DEFAULT_FOCUS_MINUTES,
+          DEFAULT_FOCUS_MINUTES
+        ),
+        breakDurationMinutes: clampBreakMinutes(
+          sourceRow.break_duration_minutes ?? DEFAULT_BREAK_MINUTES,
+          DEFAULT_BREAK_MINUTES
+        ),
       };
 
       insertTaskRow(db, task);
@@ -279,6 +375,15 @@ function getTaskSelectClause(db: SQLite.SQLiteDatabase): string {
   const windowSelect = hasColumn(db, 'daily_tasks', 'scheduled_window_start')
     ? 'scheduled_window_start'
     : "'' AS scheduled_window_start";
+  const phaseSelect = hasColumn(db, 'daily_tasks', 'phase_id')
+    ? 'phase_id'
+    : "'phase1' AS phase_id";
+  const focusDurationSelect = hasColumn(db, 'daily_tasks', 'focus_duration_minutes')
+    ? 'focus_duration_minutes'
+    : `${DEFAULT_FOCUS_MINUTES} AS focus_duration_minutes`;
+  const breakDurationSelect = hasColumn(db, 'daily_tasks', 'break_duration_minutes')
+    ? 'break_duration_minutes'
+    : `${DEFAULT_BREAK_MINUTES} AS break_duration_minutes`;
 
   return `
     SELECT
@@ -297,7 +402,10 @@ function getTaskSelectClause(db: SQLite.SQLiteDatabase): string {
       ${taskTypeSelect},
       ${effortLevelSelect},
       ${milestoneSelect},
-      ${windowSelect}
+      ${windowSelect},
+      ${phaseSelect},
+      ${focusDurationSelect},
+      ${breakDurationSelect}
     FROM daily_tasks
   `;
 }
@@ -350,6 +458,18 @@ function insertTaskRow(db: SQLite.SQLiteDatabase, task: DailyTask): void {
   if (hasColumn(db, 'daily_tasks', 'scheduled_window_start')) {
     columns.push('scheduled_window_start');
     values.push(task.scheduledWindowStart);
+  }
+  if (hasColumn(db, 'daily_tasks', 'phase_id')) {
+    columns.push('phase_id');
+    values.push(task.phaseId);
+  }
+  if (hasColumn(db, 'daily_tasks', 'focus_duration_minutes')) {
+    columns.push('focus_duration_minutes');
+    values.push(task.focusDurationMinutes);
+  }
+  if (hasColumn(db, 'daily_tasks', 'break_duration_minutes')) {
+    columns.push('break_duration_minutes');
+    values.push(task.breakDurationMinutes);
   }
 
   const placeholders = columns.map(() => '?').join(', ');

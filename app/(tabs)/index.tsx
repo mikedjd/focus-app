@@ -23,8 +23,10 @@ import { useBrainDump } from '../../src/hooks/useBrainDump';
 import { useInbox } from '../../src/hooks/useInbox';
 import { useProjects } from '../../src/hooks/useProjects';
 import { useTodayTasks } from '../../src/hooks/useTodayTasks';
+import { useDailyRhythmSettings } from '../../src/hooks/useDailyRhythmSettings';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatDisplayDate } from '../../src/utils/dates';
+import { DAILY_PHASES, getCurrentPhaseId, getPhaseTimeLabel } from '../../src/utils/dailyPhases';
 import type { BrainDumpItem, DailyTask, ResumeContext } from '../../src/types';
 
 export default function TodayScreen() {
@@ -44,6 +46,7 @@ export default function TodayScreen() {
   const { projects, addProject, removeProject } = useProjects(activeGoal?.id ?? null);
   const { items: brainDumpItems, capture: captureBrainDump, remove: removeBrainDumpItem } = useBrainDump();
   const { pendingCount: inboxCount } = useInbox(activeGoal?.id ?? null);
+  const { wakeTime } = useDailyRhythmSettings();
 
   const resumeContext = useAppStore((state) => state.resumeContext);
   const setResumeContext = useAppStore((state) => state.setResumeContext);
@@ -52,6 +55,7 @@ export default function TodayScreen() {
   const [showAddSheet, setShowAddSheet] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [activeProjectFilter, setActiveProjectFilter] = useState<string | null>(null);
+  const [draftPhaseId, setDraftPhaseId] = useState<'phase1' | 'phase2' | 'phase3'>('phase1');
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [promptDismissed, setPromptDismissed] = useState(false);
   const [resumeTask, setResumeTask] = useState<DailyTask | null>(null);
@@ -101,9 +105,9 @@ export default function TodayScreen() {
   const handleDrop = useCallback((taskId: string) => { void dropTask(taskId); }, [dropTask]);
 
   const handleAddTask = useCallback(
-    async (title: string, nextStep?: string, projectId?: string | null) => {
+    async (input: Parameters<typeof addTask>[0]) => {
       setResumeError(null);
-      return addTask(title, weeklyFocus?.id ?? null, nextStep, projectId);
+      return addTask(input, weeklyFocus?.id ?? null);
     },
     [addTask, weeklyFocus?.id]
   );
@@ -157,11 +161,8 @@ export default function TodayScreen() {
     () => tasks.filter((task) => task.goalId !== STANDALONE_TASKS_GOAL_ID && task.taskType === 'goal'),
     [tasks]
   );
-  const secondaryTasks = useMemo(
-    () => tasks.filter((task) => task.goalId === STANDALONE_TASKS_GOAL_ID || task.taskType !== 'goal'),
-    [tasks]
-  );
   const firstPendingTask = mainTasks.find((t) => t.status === 'pending') ?? null;
+  const currentPhaseId = useMemo(() => getCurrentPhaseId(new Date(), wakeTime), [wakeTime]);
   const showNextUpPrompt = !!activeGoal && !!firstPendingTask && !promptDismissed && !resumeContext;
 
   return (
@@ -244,35 +245,63 @@ export default function TodayScreen() {
           onPress={() => router.push('/(tabs)/goals')}
         />
 
-        <TaskList
-          title="Main Tasks"
-          tasks={mainTasks}
-          projects={projects}
-          doneCount={mainTasks.filter((task) => task.status === 'done').length}
-          canAddMore={false}
-          activeProjectFilter={activeProjectFilter}
-          emptyStateText={activeGoal ? 'No main tasks queued for this goal yet.' : 'No active goal right now.'}
-          showAddButton={false}
-          onToggleTask={handleToggle}
-          onFocusTask={handleFocus}
-          onDropTask={handleDrop}
-          onPressAddTask={() => {}}
-        />
+        <View style={styles.rhythmCard}>
+          <Text style={styles.rhythmLabel}>Daily rhythm</Text>
+          <Text style={styles.rhythmCopy}>
+            Wake time {wakeTime}. Plan deep work first, admin and gym next, then creative work and review.
+          </Text>
+        </View>
 
-        <TaskList
-          title="Secondary Tasks"
-          tasks={secondaryTasks}
-          projects={[]}
-          doneCount={secondaryTasks.filter((task) => task.status === 'done').length}
-          canAddMore={canAddMore}
-          activeProjectFilter={null}
-          emptyStateText="Life admin and other non-goal tasks go here."
-          firstAddLabel="+ Add your first secondary task"
-          onToggleTask={handleToggle}
-          onFocusTask={handleFocus}
-          onDropTask={handleDrop}
-          onPressAddTask={() => setShowAddSheet(true)}
-        />
+        {DAILY_PHASES.map((phase) => {
+          const phaseTasks = tasks.filter((task) => task.phaseId === phase.id);
+          const phaseDoneCount = phaseTasks.filter((task) => task.status === 'done').length;
+
+          return (
+            <View key={phase.id} style={styles.phaseSection}>
+              <View style={styles.phaseHeader}>
+                <View style={styles.phaseHeaderCopy}>
+                  <Text style={styles.phaseEyebrow}>
+                    {phase.title} · {getPhaseTimeLabel(phase.id, wakeTime)}
+                  </Text>
+                  <Text style={styles.phaseTitle}>{phase.shortLabel}</Text>
+                  <Text style={styles.phaseSummary}>{phase.summary}</Text>
+                </View>
+                {phase.id === currentPhaseId ? (
+                  <View style={styles.phaseNowBadge}>
+                    <Text style={styles.phaseNowText}>Now</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              <TaskList
+                title={`${phase.title} tasks`}
+                tasks={phaseTasks}
+                projects={phase.id === 'phase2' ? [] : projects}
+                doneCount={phaseDoneCount}
+                canAddMore={canAddMore}
+                activeProjectFilter={phase.id === 'phase2' ? null : activeProjectFilter}
+                emptyStateText={
+                  phase.id === 'phase2'
+                    ? 'Admin, errands, lighter work, and gym belong here.'
+                    : phase.id === 'phase3'
+                      ? 'Creative work, daily review, and tomorrow planning belong here.'
+                      : activeGoal
+                        ? 'Protect this block for your deepest, highest-value work.'
+                        : 'Set an active goal first, then place deep work here.'
+                }
+                firstAddLabel={`+ Add ${phase.title.toLowerCase()} task`}
+                showAddButton={canAddMore}
+                onToggleTask={handleToggle}
+                onFocusTask={handleFocus}
+                onDropTask={handleDrop}
+                onPressAddTask={() => {
+                  setDraftPhaseId(phase.id);
+                  setShowAddSheet(true);
+                }}
+              />
+            </View>
+          );
+        })}
 
         <BrainDumpCard
           items={brainDumpItems}
@@ -284,12 +313,13 @@ export default function TodayScreen() {
 
       <AddTaskSheet
         visible={showAddSheet}
-        activeGoalTitle={undefined}
-        projects={[]}
-        selectedProjectId={null}
+        activeGoalTitle={draftPhaseId === 'phase2' ? 'Phase 2 lane' : activeGoal?.title}
+        projects={projects}
+        selectedProjectId={activeProjectFilter}
+        initialPhaseId={draftPhaseId}
         initialTitle={promoteText ?? undefined}
         onClose={() => { setShowAddSheet(false); setPromoteText(null); }}
-        onSubmit={(title, nextStep) => handleAddTask(title, null, nextStep, null)}
+        onSubmit={handleAddTask}
       />
     </SafeAreaView>
   );
@@ -333,4 +363,66 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   filterChipText: { fontSize: 12, color: C.accent, fontWeight: '600' },
+  rhythmCard: {
+    backgroundColor: C.accentLight,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 18,
+  },
+  rhythmLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: C.accent,
+  },
+  rhythmCopy: {
+    marginTop: 6,
+    fontSize: 14,
+    lineHeight: 20,
+    color: C.text,
+  },
+  phaseSection: {
+    marginBottom: 10,
+  },
+  phaseHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 10,
+  },
+  phaseHeaderCopy: {
+    flex: 1,
+  },
+  phaseEyebrow: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    color: C.accent,
+  },
+  phaseTitle: {
+    marginTop: 3,
+    fontSize: 18,
+    fontWeight: '700',
+    color: C.text,
+  },
+  phaseSummary: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    color: C.textSecondary,
+  },
+  phaseNowBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: C.accent,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  phaseNowText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
+  },
 });

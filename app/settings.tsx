@@ -16,6 +16,8 @@ import {
   DEFAULT_TRIAGE_MODEL,
   useTriageSettings,
 } from '../src/hooks/useTriageSettings';
+import { useDailyRhythmSettings } from '../src/hooks/useDailyRhythmSettings';
+import { DAILY_PHASES, getPhaseTimeLabel } from '../src/utils/dailyPhases';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -27,8 +29,21 @@ export default function SettingsScreen() {
     setModel,
     setApiKey,
   } = useTriageSettings();
+  const {
+    wakeTime,
+    defaultFocusMinutes,
+    defaultBreakMinutes,
+    focusModeAssistEnabled,
+    setWakeTime,
+    setDefaultFocusMinutes,
+    setDefaultBreakMinutes,
+    setFocusModeAssistEnabled,
+  } = useDailyRhythmSettings();
   const [draftKey, setDraftKey] = useState(apiKey);
   const [draftModel, setDraftModel] = useState(model);
+  const [draftWakeTime, setDraftWakeTime] = useState(wakeTime);
+  const [draftFocusMinutes, setDraftFocusMinutes] = useState(String(defaultFocusMinutes));
+  const [draftBreakMinutes, setDraftBreakMinutes] = useState(String(defaultBreakMinutes));
 
   useEffect(() => {
     setDraftKey(apiKey);
@@ -37,6 +52,18 @@ export default function SettingsScreen() {
   useEffect(() => {
     setDraftModel(model);
   }, [model]);
+
+  useEffect(() => {
+    setDraftWakeTime(wakeTime);
+  }, [wakeTime]);
+
+  useEffect(() => {
+    setDraftFocusMinutes(String(defaultFocusMinutes));
+  }, [defaultFocusMinutes]);
+
+  useEffect(() => {
+    setDraftBreakMinutes(String(defaultBreakMinutes));
+  }, [defaultBreakMinutes]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -49,6 +76,70 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Daily rhythm</Text>
+          <Text style={styles.cardText}>
+            The app uses your wake time to map the day into three ADHD-friendly phases.
+          </Text>
+
+          <Text style={styles.label}>Wake time</Text>
+          <TextInput
+            style={styles.input}
+            value={draftWakeTime}
+            onChangeText={setDraftWakeTime}
+            placeholder="07:00"
+            placeholderTextColor={C.textMuted}
+            keyboardType="numbers-and-punctuation"
+            maxLength={5}
+            onBlur={() => setWakeTime(draftWakeTime)}
+          />
+
+          <View style={styles.timerRow}>
+            <View style={styles.timerField}>
+              <Text style={styles.label}>Default focus (min)</Text>
+              <TextInput
+                style={styles.input}
+                value={draftFocusMinutes}
+                onChangeText={setDraftFocusMinutes}
+                keyboardType="number-pad"
+                maxLength={3}
+                onBlur={() => setDefaultFocusMinutes(Number(draftFocusMinutes))}
+              />
+            </View>
+            <View style={styles.timerField}>
+              <Text style={styles.label}>Default break (min)</Text>
+              <TextInput
+                style={styles.input}
+                value={draftBreakMinutes}
+                onChangeText={setDraftBreakMinutes}
+                keyboardType="number-pad"
+                maxLength={2}
+                onBlur={() => setDefaultBreakMinutes(Number(draftBreakMinutes))}
+              />
+            </View>
+          </View>
+
+          <View style={[styles.row, styles.rowTopSpacing]}>
+            <View style={styles.copy}>
+              <Text style={styles.cardTitle}>Phone focus assist</Text>
+              <Text style={styles.cardText}>
+                On focus start, the app can try to open your phone&apos;s focus or do-not-disturb settings.
+              </Text>
+            </View>
+            <Switch value={focusModeAssistEnabled} onValueChange={setFocusModeAssistEnabled} />
+          </View>
+
+          <View style={styles.phaseList}>
+            {DAILY_PHASES.map((phase) => (
+              <View key={phase.id} style={styles.phaseRow}>
+                <Text style={styles.phaseTitle}>{phase.title}</Text>
+                <Text style={styles.phaseMeta}>{getPhaseTimeLabel(phase.id, wakeTime)}</Text>
+                <Text style={styles.phaseCopy}>{phase.summary}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
         <View style={styles.card}>
           <View style={styles.row}>
             <View style={styles.copy}>
@@ -121,6 +212,9 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'center',
   },
+  rowTopSpacing: {
+    marginTop: 14,
+  },
   copy: {
     flex: 1,
   },
@@ -157,5 +251,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 8,
+  },
+  timerRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  timerField: {
+    flex: 1,
+  },
+  phaseList: {
+    marginTop: 16,
+    gap: 10,
+  },
+  phaseRow: {
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: C.border,
+  },
+  phaseTitle: {
+    color: C.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  phaseMeta: {
+    marginTop: 2,
+    color: C.accent,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  phaseCopy: {
+    marginTop: 4,
+    color: C.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -19,12 +19,15 @@ import { BottomSheetModal } from '../src/components/BottomSheetModal';
 import { C } from '../src/constants/colors';
 import type { FocusExitReason, FocusSession, DailyTask, Goal } from '../src/types';
 import { formatElapsed } from '../src/utils/dates';
+import { DAILY_PHASES } from '../src/utils/dailyPhases';
 import { dbRecomputeGoalFriction } from '../src/db';
+import { useDailyRhythmSettings } from '../src/hooks/useDailyRhythmSettings';
 
 const BG = '#12121A';
 const TEXT_DIM = 'rgba(255,255,255,0.45)';
 const TEXT_MID = 'rgba(255,255,255,0.7)';
 const HEARTBEAT_INTERVAL_MS = 15000;
+type TimerStage = 'focus' | 'break';
 
 const EXIT_REASONS: Array<{ id: Exclude<FocusExitReason, 'switched_task'>; label: string }> = [
   { id: 'distraction', label: 'Distraction' },
@@ -42,12 +45,31 @@ export default function FocusScreen() {
   const [goal, setGoal] = useState<Goal | null>(null);
   const [session, setSession] = useState<FocusSession | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [timerStage, setTimerStage] = useState<TimerStage>('focus');
+  const [stageStartedAt, setStageStartedAt] = useState(Date.now());
+  const [stageRemaining, setStageRemaining] = useState(0);
+  const [cycleCount, setCycleCount] = useState(1);
   const [done, setDone] = useState(false);
   const [showExitSheet, setShowExitSheet] = useState(false);
   const [selectedExitReason, setSelectedExitReason] = useState<
     Exclude<FocusExitReason, 'switched_task'> | null
   >(null);
   const [allowLeave, setAllowLeave] = useState(false);
+  const [focusAssistState, setFocusAssistState] = useState<'idle' | 'opened' | 'unavailable'>('idle');
+  const { focusModeAssistEnabled } = useDailyRhythmSettings();
+
+  const focusDurationSeconds = useMemo(
+    () => Math.max(60, (task?.focusDurationMinutes ?? 50) * 60),
+    [task?.focusDurationMinutes]
+  );
+  const breakDurationSeconds = useMemo(
+    () => Math.max(0, (task?.breakDurationMinutes ?? 10) * 60),
+    [task?.breakDurationMinutes]
+  );
+  const phase = useMemo(
+    () => DAILY_PHASES.find((candidate) => candidate.id === task?.phaseId) ?? DAILY_PHASES[0],
+    [task?.phaseId]
+  );
 
   const refreshFocusState = useCallback(() => {
     if (!taskId) return;
@@ -73,6 +95,10 @@ export default function FocusScreen() {
       setSession(activeSession);
       if (activeSession) {
         setElapsed(Math.max(0, Math.floor((Date.now() - activeSession.startedAt) / 1000)));
+        setTimerStage('focus');
+        setStageStartedAt(Date.now());
+        setStageRemaining(Math.max(60, (nextTask?.focusDurationMinutes ?? 50) * 60));
+        setCycleCount(1);
       }
     })();
   }, [sessionId, taskId]);
@@ -95,6 +121,58 @@ export default function FocusScreen() {
     return () => clearInterval(interval);
   }, [done, session]);
 
+  const startStage = useCallback(
+    (nextStage: TimerStage) => {
+      const now = Date.now();
+      setTimerStage(nextStage);
+      setStageStartedAt(now);
+      setStageRemaining(nextStage === 'focus' ? focusDurationSeconds : breakDurationSeconds);
+      if (nextStage === 'focus') {
+        setCycleCount((current) => current + 1);
+      }
+    },
+    [breakDurationSeconds, focusDurationSeconds]
+  );
+
+  useEffect(() => {
+    if (!session || session.status !== 'active' || done) {
+      return;
+    }
+
+    const tick = () => {
+      const targetSeconds = timerStage === 'focus' ? focusDurationSeconds : breakDurationSeconds;
+      if (targetSeconds <= 0) {
+        if (timerStage === 'break') {
+          startStage('focus');
+        } else {
+          setStageRemaining(0);
+        }
+        return;
+      }
+
+      const elapsedInStage = Math.max(0, Math.floor((Date.now() - stageStartedAt) / 1000));
+      const remaining = Math.max(0, targetSeconds - elapsedInStage);
+      setStageRemaining(remaining);
+
+      if (remaining > 0) {
+        return;
+      }
+
+      if (timerStage === 'focus' && breakDurationSeconds > 0) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        startStage('break');
+        return;
+      }
+
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      startStage('focus');
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [breakDurationSeconds, done, focusDurationSeconds, session, stageStartedAt, startStage, timerStage]);
+
   useEffect(() => {
     if (!session || session.status !== 'active' || done) {
       return;
@@ -112,6 +190,10 @@ export default function FocusScreen() {
       return '';
     }
 
+    if (timerStage === 'break') {
+      return 'Step away on purpose. Let the break finish, then roll back into the next focus block.';
+    }
+
     if (task.nextStep) {
       return task.nextStep;
     }
@@ -119,7 +201,48 @@ export default function FocusScreen() {
     return task.sourceTaskId
       ? 'Return to the next concrete move on this task. Stay here until you can finish or exit intentionally.'
       : 'Stay on this one task until you can finish it or choose to exit intentionally.';
-  }, [task]);
+  }, [task, timerStage]);
+
+  const openPhoneFocusAssist = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      setFocusAssistState('unavailable');
+      return false;
+    }
+
+    try {
+      if (Platform.OS === 'android' && typeof (Linking as typeof Linking & { sendIntent?: Function }).sendIntent === 'function') {
+        await (Linking as typeof Linking & { sendIntent: (action: string) => Promise<void> }).sendIntent('android.settings.ZEN_MODE_SETTINGS');
+        setFocusAssistState('opened');
+        return true;
+      }
+
+      if (Platform.OS === 'ios') {
+        for (const url of ['App-Prefs:FOCUS', 'App-Prefs:ROOT=DO_NOT_DISTURB']) {
+          const supported = await Linking.canOpenURL(url);
+          if (supported) {
+            await Linking.openURL(url);
+            setFocusAssistState('opened');
+            return true;
+          }
+        }
+      }
+
+      await Linking.openSettings();
+      setFocusAssistState('opened');
+      return true;
+    } catch {
+      setFocusAssistState('unavailable');
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!focusModeAssistEnabled || !session || session.status !== 'active' || done) {
+      return;
+    }
+
+    void openPhoneFocusAssist();
+  }, [done, focusModeAssistEnabled, openPhoneFocusAssist, session]);
 
   const handleDone = useCallback(() => {
     if (!taskId || !session) {
@@ -231,9 +354,24 @@ export default function FocusScreen() {
           </View>
         ) : (
           <>
-            <Text style={styles.focusLabel}>Focus</Text>
+            <Text style={styles.focusLabel}>{timerStage === 'focus' ? 'Focus block' : 'Break block'}</Text>
+            <Text style={styles.countdown}>{formatElapsed(stageRemaining)}</Text>
+            <Text style={styles.countdownMeta}>
+              {timerStage === 'focus' ? `${task.focusDurationMinutes} min focus` : `${task.breakDurationMinutes} min break`} · cycle {cycleCount}
+            </Text>
+            <View style={styles.metaChips}>
+              <View style={styles.metaChip}>
+                <Text style={styles.metaChipText}>{phase.title}</Text>
+              </View>
+              <View style={styles.metaChip}>
+                <Text style={styles.metaChipText}>
+                  {task.focusDurationMinutes}/{task.breakDurationMinutes} min
+                </Text>
+              </View>
+            </View>
             <Text style={styles.taskTitle}>{task.title}</Text>
             <Text style={styles.helperText}>{helperText}</Text>
+            <Text style={styles.phaseHint}>{phase.summary}</Text>
             {goal ? (
               <Text style={styles.frictionHint}>
                 Aim for {goal.currentFrictionMinutes} min. Stay past it and watch your floor rise.
@@ -247,6 +385,23 @@ export default function FocusScreen() {
                   {goal.title}
                 </Text>
               </View>
+            ) : null}
+
+            <TouchableOpacity style={styles.assistButton} onPress={() => void openPhoneFocusAssist()} activeOpacity={0.8}>
+              <Text style={styles.assistButtonText}>Phone focus</Text>
+            </TouchableOpacity>
+            <Text style={styles.assistHint}>
+              {focusAssistState === 'opened'
+                ? 'System focus settings opened.'
+                : focusAssistState === 'unavailable'
+                  ? 'This device does not expose focus settings to the app.'
+                  : 'Use this to flip your phone into Focus or Do Not Disturb before the block.'}
+            </Text>
+
+            {timerStage === 'break' ? (
+              <TouchableOpacity style={styles.skipBreakButton} onPress={() => startStage('focus')} activeOpacity={0.8}>
+                <Text style={styles.skipBreakText}>Skip break</Text>
+              </TouchableOpacity>
             ) : null}
           </>
         )}
@@ -376,6 +531,39 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     textTransform: 'uppercase',
   },
+  countdown: {
+    fontSize: 54,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -1.6,
+    fontVariant: ['tabular-nums'],
+  },
+  countdownMeta: {
+    marginTop: 8,
+    marginBottom: 14,
+    fontSize: 13,
+    color: TEXT_DIM,
+    letterSpacing: 0.3,
+  },
+  metaChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  metaChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  metaChipText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   taskTitle: {
     fontSize: 30,
     fontWeight: '700',
@@ -389,6 +577,12 @@ const styles = StyleSheet.create({
     color: TEXT_MID,
     lineHeight: 24,
     marginBottom: 22,
+  },
+  phaseHint: {
+    fontSize: 13,
+    color: TEXT_DIM,
+    lineHeight: 20,
+    marginBottom: 12,
   },
   frictionHint: {
     fontSize: 13,
@@ -410,6 +604,36 @@ const styles = StyleSheet.create({
     color: TEXT_DIM,
     flex: 1,
     lineHeight: 20,
+  },
+  assistButton: {
+    marginTop: 18,
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(59,91,219,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(59,91,219,0.45)',
+  },
+  assistButtonText: {
+    color: '#C9D6FF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  assistHint: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    color: TEXT_DIM,
+  },
+  skipBreakButton: {
+    marginTop: 16,
+    alignSelf: 'flex-start',
+  },
+  skipBreakText: {
+    color: '#C9D6FF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   bottomBar: {
     paddingHorizontal: 24,

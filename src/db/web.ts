@@ -7,6 +7,8 @@
 import type {
   BrainDumpItem,
   DailyReview,
+  DailyPhaseId,
+  DailyRhythmSettings,
   DailyTask,
   FocusExitReason,
   FocusSession,
@@ -23,9 +25,19 @@ import {
   STANDALONE_TASKS_GOAL_ID,
   STANDALONE_TASKS_GOAL_TITLE,
 } from '../constants/standaloneTaskGoal';
+import {
+  clampBreakMinutes,
+  clampDurationMinutes,
+  createDefaultDailyRhythmSettings,
+  DEFAULT_BREAK_MINUTES,
+  DEFAULT_FOCUS_MINUTES,
+  getDefaultPhaseId,
+  normalizeWakeTime,
+} from '../utils/dailyPhases';
 import { formatDate, getPrevWeekStart, getWeekStart, todayString } from '../utils/dates';
 import { generateAnchorLines } from '../utils/goalAnchors';
 import { generateId } from '../utils/ids';
+import { findWindowForEffort } from './webControlCenter';
 
 // ─── Storage keys ────────────────────────────────────────────────────────────
 
@@ -84,6 +96,22 @@ function ctxRemove(key: string): void {
   } catch {}
 }
 
+function getDailyRhythmSettings(): DailyRhythmSettings {
+  const defaults = createDefaultDailyRhythmSettings();
+  return {
+    wakeTime: normalizeWakeTime(ctxGet('daily_rhythm_wake_time') || defaults.wakeTime),
+    defaultFocusMinutes: clampDurationMinutes(
+      Number(ctxGet('daily_rhythm_focus_minutes') || ''),
+      defaults.defaultFocusMinutes
+    ),
+    defaultBreakMinutes: clampBreakMinutes(
+      Number(ctxGet('daily_rhythm_break_minutes') || ''),
+      defaults.defaultBreakMinutes
+    ),
+    focusModeAssistEnabled: ctxGet('daily_rhythm_focus_assist') !== '0',
+  };
+}
+
 // ─── Goal helpers ─────────────────────────────────────────────────────────────
 
 function cleanText(value?: string | null): string {
@@ -124,7 +152,8 @@ function normalizeGoalInput(input: GoalWriteInput) {
 }
 
 function normalizeStoredGoal(goal: Goal | (Partial<Goal> & { id: string; title: string; createdAt: number })): Goal {
-  const status = goal.status === 'archived' ? 'parked' : goal.status;
+  const rawStatus = (goal as { status?: GoalStatus | 'archived' }).status;
+  const status = rawStatus === 'archived' ? 'parked' : rawStatus;
   return {
     id: goal.id,
     title: cleanText(goal.title),
@@ -354,16 +383,40 @@ function getActiveTasks(tasks: DailyTask[], date: string): DailyTask[] {
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+function normalizeTask(task: DailyTask): DailyTask {
+  const defaults = getDailyRhythmSettings();
+  const taskType = task.taskType ?? 'goal';
+  const effortLevel = task.effortLevel ?? '';
+  const phaseId =
+    task.phaseId === 'phase1' || task.phaseId === 'phase2' || task.phaseId === 'phase3'
+      ? task.phaseId
+      : getDefaultPhaseId(taskType, effortLevel);
+
+  return {
+    ...task,
+    phaseId: phaseId as DailyPhaseId,
+    focusDurationMinutes: clampDurationMinutes(
+      task.focusDurationMinutes ?? DEFAULT_FOCUS_MINUTES,
+      defaults.defaultFocusMinutes
+    ),
+    breakDurationMinutes: clampBreakMinutes(
+      task.breakDurationMinutes ?? DEFAULT_BREAK_MINUTES,
+      defaults.defaultBreakMinutes
+    ),
+  };
+}
+
 export function dbGetTodayTasks(): DailyTask[] {
   return dbGetTasksForDate(todayString());
 }
 
 export function dbGetTasksForDate(date: string): DailyTask[] {
-  return getActiveTasks(load<DailyTask>(KEY_TASKS), date);
+  return getActiveTasks(load<DailyTask>(KEY_TASKS).map(normalizeTask), date);
 }
 
 export function dbGetTaskById(id: string): DailyTask | null {
-  return load<DailyTask>(KEY_TASKS).find((t) => t.id === id) ?? null;
+  const task = load<DailyTask>(KEY_TASKS).map(normalizeTask).find((candidate) => candidate.id === id);
+  return task ?? null;
 }
 
 export function dbCreateTask(
@@ -379,6 +432,9 @@ export function dbCreateTask(
     effortLevel?: DailyTask['effortLevel'];
     milestoneId?: string | null;
     scheduledWindowStart?: string;
+    phaseId?: DailyTask['phaseId'];
+    focusDurationMinutes?: number;
+    breakDurationMinutes?: number;
   }
 ): TaskWriteResult {
   if (!goalId) {
@@ -391,6 +447,13 @@ export function dbCreateTask(
   if (isToday && getActiveTasks(tasks, targetDate).length >= DAILY_TASK_CAP) {
     return { ok: false, reason: 'task_limit_reached' };
   }
+  const defaults = getDailyRhythmSettings();
+  const taskType = options?.taskType ?? 'goal';
+  const effortLevel = options?.effortLevel ?? '';
+  // Auto-slot admin tasks into the matching energy window when none is specified
+  const scheduledWindowStart =
+    options?.scheduledWindowStart ??
+    (taskType === 'admin' && effortLevel ? findWindowForEffort(effortLevel) : '');
   const task: DailyTask = {
     id: generateId(),
     goalId: resolvedGoalId,
@@ -404,10 +467,19 @@ export function dbCreateTask(
     completedAt: null,
     sortOrder: getActiveTasks(tasks, targetDate).length,
     createdAt: Date.now(),
-    taskType: options?.taskType ?? 'goal',
-    effortLevel: options?.effortLevel ?? '',
+    taskType,
+    effortLevel,
     milestoneId: options?.milestoneId ?? null,
-    scheduledWindowStart: options?.scheduledWindowStart ?? '',
+    scheduledWindowStart,
+    phaseId: options?.phaseId ?? getDefaultPhaseId(taskType, effortLevel),
+    focusDurationMinutes: clampDurationMinutes(
+      options?.focusDurationMinutes ?? defaults.defaultFocusMinutes,
+      defaults.defaultFocusMinutes
+    ),
+    breakDurationMinutes: clampBreakMinutes(
+      options?.breakDurationMinutes ?? defaults.defaultBreakMinutes,
+      defaults.defaultBreakMinutes
+    ),
   };
   save(KEY_TASKS, [...tasks, task]);
   webRefreshResumeContext();
@@ -439,6 +511,18 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
     effortLevel: source.effortLevel ?? '',
     milestoneId: source.milestoneId ?? null,
     scheduledWindowStart: source.scheduledWindowStart ?? '',
+    phaseId:
+      source.phaseId === 'phase1' || source.phaseId === 'phase2' || source.phaseId === 'phase3'
+        ? source.phaseId
+        : getDefaultPhaseId(source.taskType ?? 'goal', source.effortLevel ?? ''),
+    focusDurationMinutes: clampDurationMinutes(
+      source.focusDurationMinutes ?? DEFAULT_FOCUS_MINUTES,
+      getDailyRhythmSettings().defaultFocusMinutes
+    ),
+    breakDurationMinutes: clampBreakMinutes(
+      source.breakDurationMinutes ?? DEFAULT_BREAK_MINUTES,
+      getDailyRhythmSettings().defaultBreakMinutes
+    ),
   };
   save(KEY_TASKS, [...tasks, task]);
   webRefreshResumeContext();
@@ -446,21 +530,21 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
 }
 
 export function dbCompleteTask(id: string): boolean {
-  const tasks = load<DailyTask>(KEY_TASKS);
+  const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
   save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'done' as const, completedAt: Date.now() } : t)));
   webRefreshResumeContext();
   return true;
 }
 
 export function dbUncompleteTask(id: string): boolean {
-  const tasks = load<DailyTask>(KEY_TASKS);
+  const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
   save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'pending' as const, completedAt: null } : t)));
   webRefreshResumeContext();
   return true;
 }
 
 export function dbDropTask(id: string): boolean {
-  const tasks = load<DailyTask>(KEY_TASKS);
+  const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
   save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'dropped' as const } : t)));
   webRefreshResumeContext();
   return true;
@@ -791,7 +875,7 @@ export function dbDeleteProject(id: string): boolean {
   const projects = load<Project>(KEY_PROJECTS);
   save(KEY_PROJECTS, projects.filter((p) => p.id !== id));
   // Unlink tasks from deleted project
-  const tasks = load<DailyTask>(KEY_TASKS);
+  const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
   save(KEY_TASKS, tasks.map((t) => (t.projectId === id ? { ...t, projectId: null } : t)));
   return true;
 }
@@ -853,7 +937,7 @@ export function dbUpdateBrainDumpItem(id: string, text: string): boolean {
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
 function webRefreshResumeContext(): ResumeContext | null {
-  const tasks = load<DailyTask>(KEY_TASKS);
+  const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
   const sessions = load<FocusSession>(KEY_FOCUS_SESSIONS);
   const dismissedKey = ctxGet(DISMISSED_RESUME_TASK_ID_KEY);
   const today = todayString();

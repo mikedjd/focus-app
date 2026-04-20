@@ -11,6 +11,7 @@ import * as Haptics from 'expo-haptics';
 import { STANDALONE_TASKS_GOAL_ID } from '../constants/standaloneTaskGoal';
 import type { DailyTask } from '../types';
 import { C } from '../constants/colors';
+import { DAILY_PHASES } from '../utils/dailyPhases';
 
 const SWIPE_THRESHOLD = 80;
 const DROP_EXIT = -500;
@@ -27,11 +28,14 @@ export function TaskCard({ task, isNextUp = false, onToggle, onFocus, onDrop }: 
   const done = task.status === 'done';
   const translateX = useRef(new Animated.Value(0)).current;
   const dropping = useRef(false);
+  const phase = DAILY_PHASES.find((candidate) => candidate.id === task.phaseId) ?? DAILY_PHASES[0];
   const chips = [
+    phase.title,
     task.goalId === STANDALONE_TASKS_GOAL_ID ? 'Secondary' : null,
     task.taskType === 'admin' ? 'Admin' : null,
     task.effortLevel ? task.effortLevel : null,
     task.scheduledWindowStart ? `Window ${task.scheduledWindowStart}` : null,
+    `${task.focusDurationMinutes}/${task.breakDurationMinutes} min`,
   ].filter(Boolean) as string[];
 
   // Clamp revealed drop-zone width for the background hint

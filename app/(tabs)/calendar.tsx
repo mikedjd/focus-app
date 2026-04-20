@@ -17,7 +17,7 @@ import { C } from '../../src/constants/colors';
 import { useGoals } from '../../src/hooks/useGoals';
 import { useProjects } from '../../src/hooks/useProjects';
 import { formatDate, formatDisplayDate, todayString } from '../../src/utils/dates';
-import type { DailyTask } from '../../src/types';
+import type { DailyTask, TaskPlanInput } from '../../src/types';
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DAILY_CAP = 3;
@@ -146,16 +146,21 @@ export default function CalendarScreen() {
   }, [refreshCalendar]);
 
   const handleAddTask = useCallback(
-    async (title: string, nextStep?: string, projectId?: string | null) => {
+    async (input: TaskPlanInput) => {
       if (!activeGoal) return { ok: false as const, reason: 'missing_goal' as const };
 
       const result = await createTask({
-        title,
+        title: input.title,
         goalId: activeGoal.id,
         weeklyFocusId: weeklyFocus?.id ?? null,
-        nextStep,
-        projectId,
-        options: { date: selectedDate },
+        nextStep: input.nextStep,
+        projectId: input.projectId,
+        options: {
+          date: selectedDate,
+          phaseId: input.phaseId,
+          focusDurationMinutes: input.focusDurationMinutes,
+          breakDurationMinutes: input.breakDurationMinutes,
+        },
       });
       void refreshCalendar();
       return result;

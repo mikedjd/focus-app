@@ -11,6 +11,8 @@ const dbPath = path.join(dataDir, 'focus-web.sqlite');
 const PORT = Number.parseInt(process.env.PORT ?? '3001', 10);
 const FOCUS_RESUME_WINDOW_MS = 36 * 60 * 60 * 1000;
 const DAILY_TASK_CAP = 3;
+const DEFAULT_FOCUS_MINUTES = 50;
+const DEFAULT_BREAK_MINUTES = 10;
 
 fs.mkdirSync(dataDir, { recursive: true });
 const db = new DatabaseSync(dbPath);
@@ -142,6 +144,53 @@ function bootstrapDatabase() {
     CREATE INDEX IF NOT EXISTS idx_focus_sessions_status_started
       ON focus_sessions(status, started_at DESC);
   `);
+
+  ensureColumn('daily_tasks', 'phase_id', "ALTER TABLE daily_tasks ADD COLUMN phase_id TEXT NOT NULL DEFAULT 'phase1'");
+  ensureColumn('daily_tasks', 'project_id', 'ALTER TABLE daily_tasks ADD COLUMN project_id TEXT');
+  ensureColumn('daily_tasks', 'task_type', "ALTER TABLE daily_tasks ADD COLUMN task_type TEXT NOT NULL DEFAULT 'goal'");
+  ensureColumn('daily_tasks', 'effort_level', "ALTER TABLE daily_tasks ADD COLUMN effort_level TEXT NOT NULL DEFAULT ''");
+  ensureColumn('daily_tasks', 'milestone_id', 'ALTER TABLE daily_tasks ADD COLUMN milestone_id TEXT');
+  ensureColumn(
+    'daily_tasks',
+    'scheduled_window_start',
+    "ALTER TABLE daily_tasks ADD COLUMN scheduled_window_start TEXT NOT NULL DEFAULT ''"
+  );
+  ensureColumn(
+    'daily_tasks',
+    'focus_duration_minutes',
+    `ALTER TABLE daily_tasks ADD COLUMN focus_duration_minutes INTEGER NOT NULL DEFAULT ${DEFAULT_FOCUS_MINUTES}`
+  );
+  ensureColumn(
+    'daily_tasks',
+    'break_duration_minutes',
+    `ALTER TABLE daily_tasks ADD COLUMN break_duration_minutes INTEGER NOT NULL DEFAULT ${DEFAULT_BREAK_MINUTES}`
+  );
+  ensureColumn(
+    'goals',
+    'current_friction_minutes',
+    'ALTER TABLE goals ADD COLUMN current_friction_minutes INTEGER NOT NULL DEFAULT 2'
+  );
+  ensureColumn(
+    'goals',
+    'weekly_seated_seconds',
+    'ALTER TABLE goals ADD COLUMN weekly_seated_seconds INTEGER NOT NULL DEFAULT 0'
+  );
+  ensureColumn(
+    'goals',
+    'weekly_seated_week_of',
+    "ALTER TABLE goals ADD COLUMN weekly_seated_week_of TEXT NOT NULL DEFAULT ''"
+  );
+}
+
+function hasColumn(tableName, columnName) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  return columns.some((column) => column.name === columnName);
+}
+
+function ensureColumn(tableName, columnName, sql) {
+  if (!hasColumn(tableName, columnName)) {
+    db.exec(sql);
+  }
 }
 
 const commands = {
@@ -179,8 +228,8 @@ const commands = {
   getTaskById({ id }) {
     return getTaskById(id);
   },
-  createTask({ title, goalId, weeklyFocusId = null, nextStep = '', options = {} }) {
-    return createTask(title, goalId, weeklyFocusId, nextStep, options);
+  createTask({ title, goalId, weeklyFocusId = null, nextStep = '', projectId = null, options = {} }) {
+    return createTask(title, goalId, weeklyFocusId, nextStep, { ...options, projectId });
   },
   carryForwardTask({ taskId }) {
     return carryForwardTask(taskId);
@@ -351,6 +400,44 @@ function sanitizeSentence(value) {
   return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}.`;
 }
 
+function clampDurationMinutes(value, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.min(180, Math.round(numeric)));
+}
+
+function clampBreakMinutes(value, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.min(60, Math.round(numeric)));
+}
+
+function getDefaultPhaseId(taskType = 'goal', effortLevel = '') {
+  if (taskType === 'admin' || effortLevel === 'light') {
+    return 'phase2';
+  }
+
+  return 'phase1';
+}
+
+function normalizePhaseId(phaseId, taskType = 'goal', effortLevel = '') {
+  if (phaseId === 'phase1' || phaseId === 'phase2' || phaseId === 'phase3') {
+    return phaseId;
+  }
+
+  return getDefaultPhaseId(taskType, effortLevel);
+}
+
+function getPlannerDefault(key, fallback, clamp) {
+  return clamp(getContext(key), fallback);
+}
+
 function normalizeGoalInput(input = {}) {
   const practicalReason = cleanText(input.practicalReason);
   const emotionalReason = cleanText(input.emotionalReason);
@@ -386,8 +473,15 @@ function mapGoal(row) {
     costOfDrift: row.cost_of_drift || '',
     anchorWhy: row.anchor_why || row.why,
     anchorDrift: row.anchor_drift || '',
+    importance: 0,
+    urgency: 0,
+    payoff: 0,
+    whyNow: '',
     createdAt: row.created_at,
     status: row.status,
+    currentFrictionMinutes: row.current_friction_minutes ?? 2,
+    weeklySeatedSeconds: row.weekly_seated_seconds ?? 0,
+    weeklySeatedWeekOf: row.weekly_seated_week_of ?? '',
   };
 }
 
@@ -502,9 +596,12 @@ function upsertWeeklyFocus(goalId, focus) {
 
 function mapTask(row) {
   if (!row) return null;
+  const taskType = row.task_type || 'goal';
+  const effortLevel = row.effort_level || '';
   return {
     id: row.id,
     goalId: row.goal_id,
+    projectId: row.project_id ?? null,
     weeklyFocusId: row.weekly_focus_id,
     sourceTaskId: row.source_task_id,
     title: row.title,
@@ -514,6 +611,19 @@ function mapTask(row) {
     completedAt: row.completed_at,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
+    taskType,
+    effortLevel,
+    milestoneId: row.milestone_id ?? null,
+    scheduledWindowStart: row.scheduled_window_start || '',
+    phaseId: normalizePhaseId(row.phase_id, taskType, effortLevel),
+    focusDurationMinutes: clampDurationMinutes(
+      row.focus_duration_minutes,
+      getPlannerDefault('daily_rhythm_focus_minutes', DEFAULT_FOCUS_MINUTES, clampDurationMinutes)
+    ),
+    breakDurationMinutes: clampBreakMinutes(
+      row.break_duration_minutes,
+      getPlannerDefault('daily_rhythm_break_minutes', DEFAULT_BREAK_MINUTES, clampBreakMinutes)
+    ),
   };
 }
 
@@ -521,7 +631,9 @@ function getTasksForDate(date) {
   return db
     .prepare(
       `SELECT id, goal_id, weekly_focus_id, source_task_id, title, next_step, date, status,
-              completed_at, sort_order, created_at
+              completed_at, sort_order, created_at, project_id, task_type, effort_level,
+              milestone_id, scheduled_window_start, phase_id, focus_duration_minutes,
+              break_duration_minutes
        FROM daily_tasks
        WHERE date = ? AND status != 'dropped'
        ORDER BY sort_order`
@@ -534,7 +646,9 @@ function getTaskById(id) {
   return mapTask(
     db.prepare(
       `SELECT id, goal_id, weekly_focus_id, source_task_id, title, next_step, date, status,
-              completed_at, sort_order, created_at
+              completed_at, sort_order, created_at, project_id, task_type, effort_level,
+              milestone_id, scheduled_window_start, phase_id, focus_duration_minutes,
+              break_duration_minutes
        FROM daily_tasks WHERE id = ?`
     ).get(id)
   );
@@ -557,9 +671,22 @@ function createTask(title, goalId, weeklyFocusId = null, nextStep = '', options 
     return { ok: false, reason: 'task_limit_reached' };
   }
 
+  const taskType = options.taskType ?? 'goal';
+  const effortLevel = options.effortLevel ?? '';
+  const defaultFocusMinutes = getPlannerDefault(
+    'daily_rhythm_focus_minutes',
+    DEFAULT_FOCUS_MINUTES,
+    clampDurationMinutes
+  );
+  const defaultBreakMinutes = getPlannerDefault(
+    'daily_rhythm_break_minutes',
+    DEFAULT_BREAK_MINUTES,
+    clampBreakMinutes
+  );
   const task = {
     id: generateId(),
     goalId,
+    projectId: options.projectId ?? null,
     weeklyFocusId,
     sourceTaskId: options.sourceTaskId ?? null,
     title: cleanText(title),
@@ -569,16 +696,25 @@ function createTask(title, goalId, weeklyFocusId = null, nextStep = '', options 
     completedAt: null,
     sortOrder: getTaskCountForDate(targetDate),
     createdAt: Date.now(),
+    taskType,
+    effortLevel,
+    milestoneId: options.milestoneId ?? null,
+    scheduledWindowStart: cleanText(options.scheduledWindowStart),
+    phaseId: normalizePhaseId(options.phaseId, taskType, effortLevel),
+    focusDurationMinutes: clampDurationMinutes(options.focusDurationMinutes, defaultFocusMinutes),
+    breakDurationMinutes: clampBreakMinutes(options.breakDurationMinutes, defaultBreakMinutes),
   };
 
   db.prepare(
     `INSERT INTO daily_tasks (
-      id, goal_id, weekly_focus_id, source_task_id, title, next_step,
-      date, status, completed_at, sort_order, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      id, goal_id, project_id, weekly_focus_id, source_task_id, title, next_step,
+      date, status, completed_at, sort_order, created_at, task_type, effort_level,
+      milestone_id, scheduled_window_start, phase_id, focus_duration_minutes, break_duration_minutes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     task.goalId,
+    task.projectId,
     task.weeklyFocusId,
     task.sourceTaskId,
     task.title,
@@ -587,7 +723,14 @@ function createTask(title, goalId, weeklyFocusId = null, nextStep = '', options 
     task.status,
     task.completedAt,
     task.sortOrder,
-    task.createdAt
+    task.createdAt,
+    task.taskType,
+    task.effortLevel,
+    task.milestoneId,
+    task.scheduledWindowStart,
+    task.phaseId,
+    task.focusDurationMinutes,
+    task.breakDurationMinutes
   );
 
   refreshResumeContext();
@@ -598,6 +741,8 @@ function carryForwardTask(taskId) {
   const source = db
     .prepare(
       `SELECT id, goal_id, weekly_focus_id, title, next_step
+              , project_id, task_type, effort_level, milestone_id, scheduled_window_start
+              , phase_id, focus_duration_minutes, break_duration_minutes
        FROM daily_tasks WHERE id = ? AND status = 'pending'`
     )
     .get(taskId);
@@ -613,7 +758,18 @@ function carryForwardTask(taskId) {
     source.goal_id,
     source.weekly_focus_id,
     source.next_step || '',
-    { date: targetDate, sourceTaskId: source.id }
+    {
+      date: targetDate,
+      sourceTaskId: source.id,
+      projectId: source.project_id,
+      taskType: source.task_type || 'goal',
+      effortLevel: source.effort_level || '',
+      milestoneId: source.milestone_id ?? null,
+      scheduledWindowStart: source.scheduled_window_start || '',
+      phaseId: source.phase_id,
+      focusDurationMinutes: source.focus_duration_minutes,
+      breakDurationMinutes: source.break_duration_minutes,
+    }
   );
   refreshResumeContext();
   return next;

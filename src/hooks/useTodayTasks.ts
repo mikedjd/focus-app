@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import type { DailyTask, TaskWriteResult } from '../types';
+import type { DailyTask, TaskPlanInput, TaskWriteResult } from '../types';
 import {
   carryForwardTask as apiCarryForwardTask,
   completeTask as apiCompleteTask,
@@ -25,17 +25,20 @@ export function useTodayTasks(goalId: string | null) {
 
   const addTask = useCallback(
     async (
-      title: string,
-      weeklyFocusId?: string | null,
-      nextStep?: string,
-      projectId?: string | null
+      input: TaskPlanInput,
+      weeklyFocusId?: string | null
     ): Promise<TaskWriteResult> => {
       const result = await createTask({
-        title,
+        title: input.title,
         goalId: goalId ?? '',
         weeklyFocusId: goalId ? weeklyFocusId : null,
-        nextStep,
-        projectId: goalId ? projectId : null,
+        nextStep: input.nextStep,
+        projectId: goalId ? input.projectId ?? null : null,
+        options: {
+          phaseId: input.phaseId,
+          focusDurationMinutes: input.focusDurationMinutes,
+          breakDurationMinutes: input.breakDurationMinutes,
+        },
       });
       await refresh();
       return result;

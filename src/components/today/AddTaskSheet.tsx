@@ -1,23 +1,42 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import type { Project, TaskWriteResult } from '../../types';
+import type { DailyPhaseId, Project, TaskPlanInput, TaskWriteResult } from '../../types';
 import { C } from '../../constants/colors';
 import { BottomSheetModal } from '../BottomSheetModal';
+import { useDailyRhythmSettings } from '../../hooks/useDailyRhythmSettings';
+import { DAILY_PHASES, clampBreakMinutes, clampDurationMinutes } from '../../utils/dailyPhases';
 
 interface Props {
   visible: boolean;
   activeGoalTitle?: string;
   projects: Project[];
   selectedProjectId?: string | null;
+  initialPhaseId?: DailyPhaseId;
   initialTitle?: string;
   onClose: () => void;
-  onSubmit: (title: string, nextStep?: string, projectId?: string | null) => Promise<TaskWriteResult>;
+  onSubmit: (input: TaskPlanInput) => Promise<TaskWriteResult>;
 }
 
-export function AddTaskSheet({ visible, activeGoalTitle, projects, selectedProjectId, initialTitle, onClose, onSubmit }: Props) {
+export function AddTaskSheet({
+  visible,
+  activeGoalTitle,
+  projects,
+  selectedProjectId,
+  initialPhaseId = 'phase1',
+  initialTitle,
+  onClose,
+  onSubmit,
+}: Props) {
+  const {
+    defaultFocusMinutes,
+    defaultBreakMinutes,
+  } = useDailyRhythmSettings();
   const [title, setTitle] = useState('');
   const [nextStep, setNextStep] = useState('');
   const [projectId, setProjectId] = useState<string | null>(selectedProjectId ?? null);
+  const [phaseId, setPhaseId] = useState<DailyPhaseId>(initialPhaseId);
+  const [focusMinutes, setFocusMinutes] = useState(String(defaultFocusMinutes));
+  const [breakMinutes, setBreakMinutes] = useState(String(defaultBreakMinutes));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,17 +44,27 @@ export function AddTaskSheet({ visible, activeGoalTitle, projects, selectedProje
       setTitle('');
       setNextStep('');
       setProjectId(selectedProjectId ?? null);
+      setPhaseId(initialPhaseId);
+      setFocusMinutes(String(defaultFocusMinutes));
+      setBreakMinutes(String(defaultBreakMinutes));
       setErrorMessage(null);
     } else if (initialTitle) {
       setTitle(initialTitle);
     }
-  }, [visible, selectedProjectId, initialTitle]);
+  }, [visible, selectedProjectId, initialTitle, initialPhaseId, defaultFocusMinutes, defaultBreakMinutes]);
 
   const canSubmit = useMemo(() => title.trim().length > 0, [title]);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
-    const result = await onSubmit(title.trim(), nextStep.trim(), projectId);
+    const result = await onSubmit({
+      title: title.trim(),
+      nextStep: nextStep.trim(),
+      projectId,
+      phaseId,
+      focusDurationMinutes: clampDurationMinutes(Number(focusMinutes), defaultFocusMinutes),
+      breakDurationMinutes: clampBreakMinutes(Number(breakMinutes), defaultBreakMinutes),
+    });
     if (result.ok) {
       setTitle('');
       setErrorMessage(null);
@@ -112,6 +141,56 @@ export function AddTaskSheet({ visible, activeGoalTitle, projects, selectedProje
         </View>
       ) : null}
 
+      <View style={styles.projectSection}>
+        <Text style={styles.projectLabel}>Day phase</Text>
+        <View style={styles.phaseGrid}>
+          {DAILY_PHASES.map((phase) => {
+            const selected = phaseId === phase.id;
+            return (
+              <TouchableOpacity
+                key={phase.id}
+                style={[styles.phaseCard, selected && styles.phaseCardActive]}
+                onPress={() => setPhaseId(phase.id)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.phaseTitle, selected && styles.phaseTitleActive]}>
+                  {phase.title}
+                </Text>
+                <Text style={[styles.phaseSubtitle, selected && styles.phaseSubtitleActive]}>
+                  {phase.shortLabel}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      <View style={styles.timerRow}>
+        <View style={styles.timerField}>
+          <Text style={styles.projectLabel}>Focus (min)</Text>
+          <TextInput
+            style={styles.timerInput}
+            value={focusMinutes}
+            onChangeText={setFocusMinutes}
+            keyboardType="number-pad"
+            maxLength={3}
+          />
+        </View>
+        <View style={styles.timerField}>
+          <Text style={styles.projectLabel}>Break (min)</Text>
+          <TextInput
+            style={styles.timerInput}
+            value={breakMinutes}
+            onChangeText={setBreakMinutes}
+            keyboardType="number-pad"
+            maxLength={2}
+          />
+        </View>
+      </View>
+      <Text style={styles.timerHint}>
+        This preset feeds the focus screen for this daily goal.
+      </Text>
+
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
       <View style={styles.actions}>
@@ -145,6 +224,37 @@ const styles = StyleSheet.create({
   projectSection: { marginBottom: 16 },
   projectLabel: { fontSize: 12, color: C.textSecondary, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   projectScroll: { flexGrow: 0 },
+  phaseGrid: {
+    gap: 8,
+  },
+  phaseCard: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    backgroundColor: C.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  phaseCardActive: {
+    backgroundColor: C.accentLight,
+    borderColor: C.accent,
+  },
+  phaseTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: C.text,
+  },
+  phaseTitleActive: {
+    color: C.accent,
+  },
+  phaseSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: C.textSecondary,
+  },
+  phaseSubtitleActive: {
+    color: C.accent,
+  },
   projectChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -161,6 +271,27 @@ const styles = StyleSheet.create({
   chipDot: { width: 8, height: 8, borderRadius: 4 },
   projectChipText: { fontSize: 13, color: C.text, fontWeight: '500' },
   projectChipTextActive: { color: '#fff', fontWeight: '600' },
+  timerRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  timerField: {
+    flex: 1,
+  },
+  timerInput: {
+    fontSize: 16,
+    color: C.text,
+    borderBottomWidth: 1.5,
+    borderBottomColor: C.border,
+    paddingVertical: 10,
+  },
+  timerHint: {
+    marginTop: 10,
+    marginBottom: 2,
+    fontSize: 12,
+    lineHeight: 17,
+    color: C.textSecondary,
+  },
   errorText: { fontSize: 13, color: C.danger, marginBottom: 16 },
   actions: { flexDirection: 'row', gap: 12, marginTop: 8 },
   cancelButton: {

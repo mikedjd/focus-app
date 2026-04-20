@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "adhd-app",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["expo", "start", "--web", "--port", "8082", "--no-dev-client"],
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "8082"],
       "port": 8082
     }
   ]

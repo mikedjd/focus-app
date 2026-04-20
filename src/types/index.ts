@@ -3,6 +3,7 @@ export type TaskStatus = 'pending' | 'done' | 'dropped';
 export type TaskType = 'goal' | 'admin';
 export type EffortLevel = '' | 'light' | 'medium' | 'challenging';
 export type EnergyIntensity = 'low' | 'medium' | 'high';
+export type DailyPhaseId = 'phase1' | 'phase2' | 'phase3';
 export type InboxClassification =
   | 'today_task'
   | 'admin'
@@ -150,6 +151,9 @@ export interface DailyTask {
   effortLevel: EffortLevel;
   milestoneId: string | null;
   scheduledWindowStart: string;
+  phaseId: DailyPhaseId;
+  focusDurationMinutes: number;
+  breakDurationMinutes: number;
 }
 
 export interface FocusSession {
@@ -219,6 +223,22 @@ export interface BrainDumpItem {
   id: string;
   text: string;
   createdAt: number;
+}
+
+export interface DailyRhythmSettings {
+  wakeTime: string;
+  defaultFocusMinutes: number;
+  defaultBreakMinutes: number;
+  focusModeAssistEnabled: boolean;
+}
+
+export interface TaskPlanInput {
+  title: string;
+  nextStep?: string;
+  projectId?: string | null;
+  phaseId: DailyPhaseId;
+  focusDurationMinutes: number;
+  breakDurationMinutes: number;
 }
 
 export type TaskWriteFailureReason =

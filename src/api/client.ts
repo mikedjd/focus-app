@@ -3,6 +3,7 @@ import type {
   BrainDumpItem,
   DailyReview,
   DailyTask,
+  DailyPhaseId,
   FocusExitReason,
   FocusSession,
   Goal,
@@ -175,7 +176,17 @@ export async function createTask(input: {
   weeklyFocusId?: string | null;
   nextStep?: string;
   projectId?: string | null;
-  options?: { date?: string; sourceTaskId?: string | null };
+  options?: {
+    date?: string;
+    sourceTaskId?: string | null;
+    taskType?: DailyTask['taskType'];
+    effortLevel?: DailyTask['effortLevel'];
+    milestoneId?: string | null;
+    scheduledWindowStart?: string;
+    phaseId?: DailyPhaseId;
+    focusDurationMinutes?: number;
+    breakDurationMinutes?: number;
+  };
 }): Promise<TaskWriteResult> {
   if (IS_WEB) {
     const r = webDb.dbCreateTask(input.title, input.goalId, input.weeklyFocusId, {
@@ -183,6 +194,13 @@ export async function createTask(input: {
       sourceTaskId: input.options?.sourceTaskId,
       nextStep: input.nextStep,
       projectId: input.projectId,
+      taskType: input.options?.taskType,
+      effortLevel: input.options?.effortLevel,
+      milestoneId: input.options?.milestoneId,
+      scheduledWindowStart: input.options?.scheduledWindowStart,
+      phaseId: input.options?.phaseId,
+      focusDurationMinutes: input.options?.focusDurationMinutes,
+      breakDurationMinutes: input.options?.breakDurationMinutes,
     });
     notifyDataChanged();
     return r;

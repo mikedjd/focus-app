@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'focus.db';
 const SCHEMA_VERSION_KEY = 'schema_version';
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
@@ -59,6 +59,12 @@ const migrations: Migration[] = [
     version: 8,
     run: (db) => {
       ensureControlCenterShape(db);
+    },
+  },
+  {
+    version: 9,
+    run: (db) => {
+      ensurePlannerShape(db);
     },
   },
 ];
@@ -136,6 +142,7 @@ function runMigrations(db: SQLite.SQLiteDatabase): void {
   ensureTaskInstructionShape(db);
   ensureProjectsShape(db);
   ensureControlCenterShape(db);
+  ensurePlannerShape(db);
 
   if (getSchemaVersion(db) < CURRENT_SCHEMA_VERSION) {
     setSchemaVersion(db, CURRENT_SCHEMA_VERSION);
@@ -491,6 +498,27 @@ function ensureControlCenterShape(db: SQLite.SQLiteDatabase): void {
     'daily_tasks',
     'scheduled_window_start',
     "ALTER TABLE daily_tasks ADD COLUMN scheduled_window_start TEXT NOT NULL DEFAULT ''"
+  );
+}
+
+function ensurePlannerShape(db: SQLite.SQLiteDatabase): void {
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'phase_id',
+    "ALTER TABLE daily_tasks ADD COLUMN phase_id TEXT NOT NULL DEFAULT 'phase1'"
+  );
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'focus_duration_minutes',
+    'ALTER TABLE daily_tasks ADD COLUMN focus_duration_minutes INTEGER NOT NULL DEFAULT 50'
+  );
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'break_duration_minutes',
+    'ALTER TABLE daily_tasks ADD COLUMN break_duration_minutes INTEGER NOT NULL DEFAULT 10'
   );
 }
 
