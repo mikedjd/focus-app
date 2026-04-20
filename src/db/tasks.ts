@@ -20,6 +20,10 @@ type DailyTaskRow = {
   completed_at: number | null;
   sort_order: number;
   created_at: number;
+  task_type?: string | null;
+  effort_level?: string | null;
+  milestone_id?: string | null;
+  scheduled_window_start?: string | null;
 };
 
 function mapTask(row: DailyTaskRow): DailyTask {
@@ -36,6 +40,10 @@ function mapTask(row: DailyTaskRow): DailyTask {
     completedAt: row.completed_at,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
+    taskType: ((row.task_type as DailyTask['taskType']) ?? 'goal') || 'goal',
+    effortLevel: (row.effort_level as DailyTask['effortLevel']) ?? '',
+    milestoneId: row.milestone_id ?? null,
+    scheduledWindowStart: row.scheduled_window_start ?? '',
   };
 }
 
@@ -65,7 +73,16 @@ export function dbCreateTask(
   title: string,
   goalId: string,
   weeklyFocusId?: string | null,
-  options?: { date?: string; sourceTaskId?: string | null; nextStep?: string; projectId?: string | null }
+  options?: {
+    date?: string;
+    sourceTaskId?: string | null;
+    nextStep?: string;
+    projectId?: string | null;
+    taskType?: DailyTask['taskType'];
+    effortLevel?: DailyTask['effortLevel'];
+    milestoneId?: string | null;
+    scheduledWindowStart?: string;
+  }
 ): TaskWriteResult {
   return runDb('create task', { ok: false, reason: 'db_error' } as TaskWriteResult, (db) => {
     if (!goalId) {
@@ -91,6 +108,10 @@ export function dbCreateTask(
       completedAt: null,
       sortOrder: getTaskCountForDate(db, targetDate),
       createdAt: Date.now(),
+      taskType: options?.taskType ?? 'goal',
+      effortLevel: options?.effortLevel ?? '',
+      milestoneId: options?.milestoneId ?? null,
+      scheduledWindowStart: options?.scheduledWindowStart ?? '',
     };
 
     insertTaskRow(db, task);
@@ -132,6 +153,10 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
         completedAt: null,
         sortOrder: getTaskCountForDate(db, targetDate),
         createdAt: Date.now(),
+        taskType: ((sourceRow.task_type as DailyTask['taskType']) ?? 'goal') || 'goal',
+        effortLevel: (sourceRow.effort_level as DailyTask['effortLevel']) ?? '',
+        milestoneId: sourceRow.milestone_id ?? null,
+        scheduledWindowStart: sourceRow.scheduled_window_start ?? '',
       };
 
       insertTaskRow(db, task);
@@ -195,6 +220,18 @@ function getTaskSelectClause(db: SQLite.SQLiteDatabase): string {
   const projectIdSelect = hasColumn(db, 'daily_tasks', 'project_id')
     ? 'project_id'
     : 'NULL AS project_id';
+  const taskTypeSelect = hasColumn(db, 'daily_tasks', 'task_type')
+    ? 'task_type'
+    : "'goal' AS task_type";
+  const effortLevelSelect = hasColumn(db, 'daily_tasks', 'effort_level')
+    ? 'effort_level'
+    : "'' AS effort_level";
+  const milestoneSelect = hasColumn(db, 'daily_tasks', 'milestone_id')
+    ? 'milestone_id'
+    : 'NULL AS milestone_id';
+  const windowSelect = hasColumn(db, 'daily_tasks', 'scheduled_window_start')
+    ? 'scheduled_window_start'
+    : "'' AS scheduled_window_start";
 
   return `
     SELECT
@@ -209,7 +246,11 @@ function getTaskSelectClause(db: SQLite.SQLiteDatabase): string {
       status,
       completed_at,
       sort_order,
-      ${createdAtSelect}
+      ${createdAtSelect},
+      ${taskTypeSelect},
+      ${effortLevelSelect},
+      ${milestoneSelect},
+      ${windowSelect}
     FROM daily_tasks
   `;
 }
@@ -245,6 +286,23 @@ function insertTaskRow(db: SQLite.SQLiteDatabase, task: DailyTask): void {
   if (supportsProjectId) {
     columns.push('project_id');
     values.push(task.projectId);
+  }
+
+  if (hasColumn(db, 'daily_tasks', 'task_type')) {
+    columns.push('task_type');
+    values.push(task.taskType);
+  }
+  if (hasColumn(db, 'daily_tasks', 'effort_level')) {
+    columns.push('effort_level');
+    values.push(task.effortLevel);
+  }
+  if (hasColumn(db, 'daily_tasks', 'milestone_id')) {
+    columns.push('milestone_id');
+    values.push(task.milestoneId);
+  }
+  if (hasColumn(db, 'daily_tasks', 'scheduled_window_start')) {
+    columns.push('scheduled_window_start');
+    values.push(task.scheduledWindowStart);
   }
 
   const placeholders = columns.map(() => '?').join(', ');

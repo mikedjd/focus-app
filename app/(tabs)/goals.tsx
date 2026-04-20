@@ -5,12 +5,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CreateGoalSheet } from '../../src/components/goals/CreateGoalSheet';
 import { EditFocusSheet } from '../../src/components/goals/EditFocusSheet';
 import { EditGoalSheet } from '../../src/components/goals/EditGoalSheet';
+import { GoalTrail } from '../../src/components/goals/GoalTrail';
 import { EditWhySheet } from '../../src/components/goals/EditWhySheet';
+import { MilestoneList } from '../../src/components/MilestoneList';
 import { isReviewDue } from '../../src/api/client';
 import { C } from '../../src/constants/colors';
 import { useGoals } from '../../src/hooks/useGoals';
+import { useMilestones } from '../../src/hooks/useMilestones';
+import { useParkingLot } from '../../src/hooks/useParkingLot';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatShortDate } from '../../src/utils/dates';
+import { useRouter } from 'expo-router';
 
 type ActiveSheet = 'create' | 'editGoal' | 'editWhy' | 'editFocus' | null;
 
@@ -32,6 +37,11 @@ export default function GoalsScreen() {
   } = useGoals();
   const setReviewDue = useAppStore((state) => state.setReviewDue);
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
+  const { milestones, progress, addMilestone, toggleMilestone, deleteMilestone } = useMilestones(
+    activeGoal?.id
+  );
+  const { count: parkingCount, divert } = useParkingLot();
+  const router = useRouter();
 
   useFocusEffect(
     useCallback(() => {
@@ -184,6 +194,62 @@ export default function GoalsScreen() {
               </TouchableOpacity>
             )}
 
+            <View style={styles.divider} />
+            <MilestoneList
+              milestones={milestones}
+              percent={progress?.percent ?? 0}
+              completed={progress?.completedMilestones ?? 0}
+              total={progress?.totalMilestones ?? 0}
+              onAdd={addMilestone}
+              onToggle={toggleMilestone}
+              onDelete={deleteMilestone}
+            />
+
+            <View style={styles.divider} />
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.cardLabel}>FRICTION FLOOR</Text>
+              <Text style={styles.frictionValue}>{activeGoal.currentFrictionMinutes} min</Text>
+            </View>
+            <Text style={styles.frictionHint}>
+              Start at {activeGoal.currentFrictionMinutes} min sessions. The more you sit down, the
+              higher the floor rises.
+            </Text>
+
+            <View style={styles.divider} />
+            <GoalTrail goalId={activeGoal.id} />
+
+            <View style={styles.divider} />
+            <TouchableOpacity
+              style={styles.parkingLink}
+              activeOpacity={0.7}
+              onPress={() => router.push('/parking-lot')}
+            >
+              <Text style={styles.parkingLinkText}>
+                Parking lot {parkingCount > 0 ? `(${parkingCount})` : ''} →
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.parkingLink}
+              activeOpacity={0.7}
+              onPress={() => router.push('/energy-windows')}
+            >
+              <Text style={styles.parkingLinkText}>Energy windows →</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.parkingLink}
+              activeOpacity={0.7}
+              onPress={() => setActiveSheet('create')}
+            >
+              <Text style={styles.parkingLinkText}>Park a new idea →</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.parkingLink}
+              activeOpacity={0.7}
+              onPress={() => router.push('/settings')}
+            >
+              <Text style={styles.parkingLinkText}>Triage settings →</Text>
+            </TouchableOpacity>
+
             {/* Complete action — anchored at bottom of card, secondary */}
             <View style={styles.divider} />
             <TouchableOpacity onPress={handleCompleteGoal} activeOpacity={0.7}>
@@ -196,7 +262,16 @@ export default function GoalsScreen() {
       <CreateGoalSheet
         visible={activeSheet === 'create'}
         onClose={() => setActiveSheet(null)}
-        onSubmit={(input) => void createGoal(input)}
+        onSubmit={(input) => {
+          if (activeGoal) {
+            const why = input.anchorWhy || input.targetOutcome || '';
+            divert(input.title, why);
+            Alert.alert('Parked for later', 'That idea is in the parking lot for 7 days.');
+            setActiveSheet(null);
+            return;
+          }
+          void createGoal(input);
+        }}
       />
       <EditGoalSheet
         visible={activeSheet === 'editGoal'}
@@ -234,6 +309,26 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: C.text,
     letterSpacing: -0.5,
+  },
+  frictionValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: C.accent,
+    fontVariant: ['tabular-nums'],
+  },
+  frictionHint: {
+    color: C.textSecondary,
+    fontSize: 13,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  parkingLink: {
+    marginTop: 10,
+  },
+  parkingLinkText: {
+    color: C.accent,
+    fontSize: 14,
+    fontWeight: '600',
   },
 
   // ─── Empty state ───────────────────────────────────────────────

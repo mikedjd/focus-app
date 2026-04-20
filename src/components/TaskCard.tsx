@@ -26,6 +26,11 @@ export function TaskCard({ task, isNextUp = false, onToggle, onFocus, onDrop }: 
   const done = task.status === 'done';
   const translateX = useRef(new Animated.Value(0)).current;
   const dropping = useRef(false);
+  const chips = [
+    task.taskType === 'admin' ? 'Admin' : null,
+    task.effortLevel ? task.effortLevel : null,
+    task.scheduledWindowStart ? `Window ${task.scheduledWindowStart}` : null,
+  ].filter(Boolean) as string[];
 
   // Clamp revealed drop-zone width for the background hint
   const dropReveal = translateX.interpolate({
@@ -118,6 +123,15 @@ export function TaskCard({ task, isNextUp = false, onToggle, onFocus, onDrop }: 
           <Text style={[styles.title, done && styles.titleDone]} numberOfLines={2}>
             {task.title}
           </Text>
+          {chips.length > 0 ? (
+            <View style={styles.chipRow}>
+              {chips.map((chip) => (
+                <View key={chip} style={styles.chip}>
+                  <Text style={styles.chipText}>{chip}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
           {task.nextStep ? (
             <Text style={[styles.nextStep, done && styles.titleDone]} numberOfLines={2}>
               Next: {task.nextStep}
@@ -215,6 +229,23 @@ const styles = StyleSheet.create({
     color: C.text,
     lineHeight: 22,
     letterSpacing: -0.2,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+  },
+  chip: {
+    backgroundColor: C.surfaceSecondary,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  chipText: {
+    color: C.textSecondary,
+    fontSize: 11,
+    fontWeight: '600',
   },
   nextStep: {
     marginTop: 4,

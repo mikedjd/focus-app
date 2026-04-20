@@ -7,6 +7,7 @@ export { getDb, dbSchemaVersion } from './schema';
 // layer in ./web.ts. On native the original SQLite implementations are used.
 
 import * as webDb from './web';
+import * as webCc from './webControlCenter';
 
 import {
   dbGetContext as nativeGetContext,
@@ -51,6 +52,42 @@ import {
   dbClearOnboardingDraft as nativeClearOnboardingDraft,
   dbCompleteOnboarding as nativeCompleteOnboarding,
 } from './onboarding';
+
+import {
+  dbGetMilestonesForGoal as nativeGetMilestonesForGoal,
+  dbCreateMilestone as nativeCreateMilestone,
+  dbToggleMilestone as nativeToggleMilestone,
+  dbDeleteMilestone as nativeDeleteMilestone,
+  dbGetGoalProgress as nativeGetGoalProgress,
+} from './milestones';
+
+import {
+  dbGetEnergyWindows as nativeGetEnergyWindows,
+  dbGetEnergyWindowsForDay as nativeGetEnergyWindowsForDay,
+  dbCreateEnergyWindow as nativeCreateEnergyWindow,
+  dbDeleteEnergyWindow as nativeDeleteEnergyWindow,
+  dbCopyWindowsToAllWeekdays as nativeCopyWindowsToAllWeekdays,
+  findWindowForEffort as nativeFindWindowForEffort,
+} from './energyWindows';
+
+import {
+  dbGetParkingLot as nativeGetParkingLot,
+  dbGetParkingLotCount as nativeGetParkingLotCount,
+  dbDivertToParkingLot as nativeDivertToParkingLot,
+  dbPromoteParkingLotItem as nativePromoteParkingLotItem,
+  dbDismissParkingLotItem as nativeDismissParkingLotItem,
+} from './parkingLot';
+
+import {
+  dbGetPendingInboxItems as nativeGetPendingInboxItems,
+  dbGetPendingInboxCount as nativeGetPendingInboxCount,
+  dbCreateInboxItem as nativeCreateInboxItem,
+  dbUpdateInboxClassification as nativeUpdateInboxClassification,
+  dbResolveInboxItem as nativeResolveInboxItem,
+  dbDeleteInboxItem as nativeDeleteInboxItem,
+} from './inbox';
+
+import { dbRecomputeGoalFriction as nativeRecomputeGoalFriction } from './goalFriction';
 
 import {
   dbGetFocusSessionById as nativeGetFocusSessionById,
@@ -117,3 +154,36 @@ export const dbCompleteFocusSession            = isWeb ? webDb.dbCompleteFocusSe
 export const dbAbandonFocusSession             = isWeb ? webDb.dbAbandonFocusSession             : nativeAbandonFocusSession;
 export const dbGetFocusSessionsForTask         = isWeb ? webDb.dbGetFocusSessionsForTask         : nativeGetFocusSessionsForTask;
 export const dbGetFocusSessionsForWeek         = isWeb ? webDb.dbGetFocusSessionsForWeek         : nativeGetFocusSessionsForWeek;
+
+// Milestones
+export const dbGetMilestonesForGoal = isWeb ? webCc.dbGetMilestonesForGoal : nativeGetMilestonesForGoal;
+export const dbCreateMilestone      = isWeb ? webCc.dbCreateMilestone      : nativeCreateMilestone;
+export const dbToggleMilestone      = isWeb ? webCc.dbToggleMilestone      : nativeToggleMilestone;
+export const dbDeleteMilestone      = isWeb ? webCc.dbDeleteMilestone      : nativeDeleteMilestone;
+export const dbGetGoalProgress      = isWeb ? webCc.dbGetGoalProgress      : nativeGetGoalProgress;
+
+// Energy windows
+export const dbGetEnergyWindows         = isWeb ? webCc.dbGetEnergyWindows         : nativeGetEnergyWindows;
+export const dbGetEnergyWindowsForDay   = isWeb ? webCc.dbGetEnergyWindowsForDay   : nativeGetEnergyWindowsForDay;
+export const dbCreateEnergyWindow       = isWeb ? webCc.dbCreateEnergyWindow       : nativeCreateEnergyWindow;
+export const dbDeleteEnergyWindow       = isWeb ? webCc.dbDeleteEnergyWindow       : nativeDeleteEnergyWindow;
+export const dbCopyWindowsToAllWeekdays = isWeb ? webCc.dbCopyWindowsToAllWeekdays : nativeCopyWindowsToAllWeekdays;
+export const findWindowForEffort        = isWeb ? webCc.findWindowForEffort        : nativeFindWindowForEffort;
+
+// Parking lot
+export const dbGetParkingLot          = isWeb ? webCc.dbGetParkingLot          : nativeGetParkingLot;
+export const dbGetParkingLotCount     = isWeb ? webCc.dbGetParkingLotCount     : nativeGetParkingLotCount;
+export const dbDivertToParkingLot     = isWeb ? webCc.dbDivertToParkingLot     : nativeDivertToParkingLot;
+export const dbPromoteParkingLotItem  = isWeb ? webCc.dbPromoteParkingLotItem  : nativePromoteParkingLotItem;
+export const dbDismissParkingLotItem  = isWeb ? webCc.dbDismissParkingLotItem  : nativeDismissParkingLotItem;
+
+// Inbox
+export const dbGetPendingInboxItems     = isWeb ? webCc.dbGetPendingInboxItems     : nativeGetPendingInboxItems;
+export const dbGetPendingInboxCount     = isWeb ? webCc.dbGetPendingInboxCount     : nativeGetPendingInboxCount;
+export const dbCreateInboxItem          = isWeb ? webCc.dbCreateInboxItem          : nativeCreateInboxItem;
+export const dbUpdateInboxClassification= isWeb ? webCc.dbUpdateInboxClassification: nativeUpdateInboxClassification;
+export const dbResolveInboxItem         = isWeb ? webCc.dbResolveInboxItem         : nativeResolveInboxItem;
+export const dbDeleteInboxItem          = isWeb ? webCc.dbDeleteInboxItem          : nativeDeleteInboxItem;
+
+// Friction
+export const dbRecomputeGoalFriction = isWeb ? webCc.dbRecomputeGoalFriction : nativeRecomputeGoalFriction;

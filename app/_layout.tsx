@@ -110,6 +110,10 @@ export default function RootLayout() {
         ) : (
           <Stack.Screen name="onboarding" />
         )}
+        <Stack.Screen name="inbox" />
+        <Stack.Screen name="parking-lot" />
+        <Stack.Screen name="energy-windows" />
+        <Stack.Screen name="settings" />
         <Stack.Screen
           name="focus"
           options={{
