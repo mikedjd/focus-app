@@ -304,6 +304,9 @@ a {
 .primary-button,
 .secondary-button,
 .ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 0.95rem;
   padding: 0.8rem 1rem;
   border: 1px solid transparent;
@@ -415,6 +418,12 @@ a {
 
 .align-start {
   justify-self: start;
+}
+
+.backup-shell {
+  width: min(820px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0;
 }
 
 .calendar-card .section-header h3,

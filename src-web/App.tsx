@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import {
+  Link,
   Navigate,
   NavLink,
   Outlet,
@@ -9,7 +10,7 @@ import {
   useNavigate,
   useSearchParams,
 } from 'react-router-dom';
-import { db, mutate, useDataSnapshot } from './data';
+import { db, exportBackupFile, mutate, restoreBackupFile, useDataSnapshot } from './data';
 import type {
   BrainDumpItem,
   DailyTask,
@@ -749,7 +750,7 @@ function TaskRow({
   task: DailyTask;
   project?: Project | null;
   onToggle: () => void;
-  onFocus: () => void;
+  onFocus?: () => void;
   onDrop: () => void;
 }) {
   return (
@@ -770,7 +771,7 @@ function TaskRow({
         {task.nextStep ? <p>{task.nextStep}</p> : null}
       </div>
       <div className="task-actions">
-        {task.status !== 'done' ? (
+        {task.status !== 'done' && onFocus ? (
           <button className="ghost-button" onClick={onFocus} type="button">
             Focus
           </button>
@@ -1362,6 +1363,9 @@ function AppShell() {
             Review
             {reviewDue ? <span className="badge">Due</span> : null}
           </NavLink>
+          <NavLink className="nav-link" to="/backup">
+            Backup
+          </NavLink>
         </nav>
       </aside>
 
@@ -1375,8 +1379,7 @@ function AppShell() {
 function TodayPage() {
   const navigate = useNavigate();
   const {
-    activeGoal,
-    weeklyFocus,
+    activeGoalId,
     tasks,
     projects,
     brainDumpItems,
@@ -1387,8 +1390,7 @@ function TodayPage() {
   } = useDataSnapshot(() => {
     const activeGoal = db.dbGetActiveGoal();
     return {
-      activeGoal,
-      weeklyFocus: activeGoal ? db.dbGetCurrentWeeklyFocus(activeGoal.id) : null,
+      activeGoalId: activeGoal?.id ?? null,
       tasks: db.dbGetTodayTasks(),
       projects: activeGoal ? db.dbGetProjects(activeGoal.id) : [],
       brainDumpItems: db.dbGetBrainDumpItems(),
@@ -1399,11 +1401,11 @@ function TodayPage() {
     };
   });
 
-  const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [ideasOpen, setIdeasOpen] = useState(false);
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
-  const [promotedTitle, setPromotedTitle] = useState<string | undefined>(undefined);
+  const [secondaryAddOpen, setSecondaryAddOpen] = useState(false);
+  const [secondaryTaskDraft, setSecondaryTaskDraft] = useState('');
   const [brainDumpDraft, setBrainDumpDraft] = useState('');
 
   const mainTasks = (projectFilter ? tasks.filter((task) => task.projectId === projectFilter) : tasks).filter(
@@ -1412,7 +1414,6 @@ function TodayPage() {
   const secondaryTasks = tasks.filter(
     (task) => task.goalId === STANDALONE_TASKS_GOAL_ID || task.taskType !== 'goal'
   );
-  const doneCount = tasks.filter((task) => task.status === 'done').length;
   const firstPending = mainTasks.find((task) => task.status === 'pending') ?? null;
   const canAddTask = tasks.length < DAILY_CAP;
   const groupedTasks = mainTasks.reduce<Record<string, DailyTask[]>>((groups, task) => {
@@ -1421,6 +1422,26 @@ function TodayPage() {
     groups[key].push(task);
     return groups;
   }, {});
+  const createSecondaryTask = (title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const result = mutate(() =>
+      db.dbCreateTask(trimmed, '', null, {
+        taskType: 'admin',
+      })
+    );
+
+    if (!result.ok) {
+      window.alert("Today's task lane is full.");
+      return;
+    }
+
+    setSecondaryTaskDraft('');
+    setSecondaryAddOpen(false);
+  };
 
   return (
     <>
@@ -1437,9 +1458,9 @@ function TodayPage() {
             className="primary-button"
             type="button"
             disabled={!canAddTask}
-            onClick={() => setTaskModalOpen(true)}
+            onClick={() => setSecondaryAddOpen(true)}
           >
-            Add secondary task
+            Add task
           </button>
         </div>
       </section>
@@ -1484,24 +1505,6 @@ function TodayPage() {
         </section>
       ) : null}
 
-      <section className="card">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Anchor</p>
-            <h3>{activeGoal ? activeGoal.title : 'Set your goal first'}</h3>
-          </div>
-          <span className="metric-chip">{doneCount}/{tasks.length} done</span>
-        </div>
-        {activeGoal ? (
-          <>
-            <p className="muted-copy">{activeGoal.targetOutcome}</p>
-            {weeklyFocus ? <p className="focus-line">This week: {weeklyFocus.focus}</p> : null}
-          </>
-        ) : (
-          <p className="muted-copy">No active goal right now.</p>
-        )}
-      </section>
-
       {projects.length > 0 ? (
         <section className="chips">
           <button
@@ -1545,16 +1548,14 @@ function TodayPage() {
         <div className="section-header">
           <div>
             <p className="eyebrow">Main tasks</p>
-            <h3>{mainTasks.length === 0 ? 'Nothing queued' : 'Goal-linked work'}</h3>
+            <h3>{mainTasks.length === 0 ? 'Nothing queued' : 'Priority work'}</h3>
           </div>
           <span className="metric-chip">{mainTasks.filter((task) => task.status === 'done').length}/{mainTasks.length}</span>
         </div>
 
-        {!activeGoal ? (
-          <p className="muted-copy">No active goal right now.</p>
-        ) : mainTasks.length === 0 ? (
+        {mainTasks.length === 0 ? (
           <p className="muted-copy">
-            {projectFilter ? 'No main tasks in this project today.' : 'No main tasks queued for this goal yet.'}
+            {projectFilter ? 'No main tasks in this project today.' : 'No main tasks queued for today.'}
           </p>
         ) : (
           <div className="stack">
@@ -1599,18 +1600,38 @@ function TodayPage() {
         <div className="section-header">
           <div>
             <p className="eyebrow">Secondary tasks</p>
-            <h3>{secondaryTasks.length === 0 ? 'Life admin and loose ends' : 'Everything outside the main goal'}</h3>
+            <h3>{secondaryTasks.length === 0 ? 'Life admin and loose ends' : 'Everything else'}</h3>
           </div>
           <div className="inline-actions">
             <span className="metric-chip">{secondaryTasks.filter((task) => task.status === 'done').length}/{secondaryTasks.length}</span>
-            <button className="primary-button" type="button" disabled={!canAddTask} onClick={() => setTaskModalOpen(true)}>
-              {secondaryTasks.length === 0 ? 'Add your first secondary task' : 'Add secondary task'}
+            <button className="primary-button" type="button" disabled={!canAddTask} onClick={() => setSecondaryAddOpen(true)}>
+              {secondaryTasks.length === 0 ? 'Add your first task' : 'Add task'}
             </button>
           </div>
         </div>
 
+        {secondaryAddOpen ? (
+          <form
+            className="inline-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createSecondaryTask(secondaryTaskDraft);
+            }}
+          >
+            <input
+              autoFocus
+              value={secondaryTaskDraft}
+              onChange={(event) => setSecondaryTaskDraft(event.target.value)}
+              placeholder="Type a task"
+            />
+            <button className="primary-button" type="submit" disabled={!secondaryTaskDraft.trim()}>
+              Add
+            </button>
+          </form>
+        ) : null}
+
         {secondaryTasks.length === 0 ? (
-          <p className="muted-copy">Life admin and other non-goal tasks land here.</p>
+          <p className="muted-copy">Life admin and other extra tasks land here.</p>
         ) : (
           <div className="stack">
             {secondaryTasks.map((task) => (
@@ -1624,7 +1645,6 @@ function TodayPage() {
                       : db.dbCompleteTask(task.id)
                   )
                 }
-                onFocus={() => navigate(`/focus?taskId=${task.id}`)}
                 onDrop={() => {
                   if (window.confirm(`Drop "${task.title}"?`)) {
                     mutate(() => db.dbDropTask(task.id));
@@ -1683,9 +1703,9 @@ function TodayPage() {
                         className="ghost-button"
                         type="button"
                         onClick={() => {
-                          setPromotedTitle(item.text);
                           mutate(() => db.dbDeleteBrainDumpItem(item.id));
-                          setTaskModalOpen(true);
+                          setSecondaryTaskDraft(item.text);
+                          setSecondaryAddOpen(true);
                         }}
                       >
                         Promote to task
@@ -1704,34 +1724,10 @@ function TodayPage() {
         )}
       </section>
 
-      <TaskModal
-        open={taskModalOpen}
-        title="Add secondary task"
-        initialTitle={promotedTitle}
-        projects={[]}
-        selectedProjectId={null}
-        onClose={() => {
-          setTaskModalOpen(false);
-          setPromotedTitle(undefined);
-        }}
-        onSubmit={(title, nextStep, projectId) => {
-          const result = mutate(() =>
-            db.dbCreateTask(title, '', null, {
-              nextStep,
-              projectId: projectId ?? null,
-            })
-          );
-
-          if (!result.ok) {
-            window.alert("Today's task lane is full.");
-          }
-        }}
-      />
-
       <ProjectManagerModal
         open={projectModalOpen}
         projects={projects}
-        goalId={activeGoal?.id ?? null}
+        goalId={activeGoalId}
         onClose={() => setProjectModalOpen(false)}
       />
     </>
@@ -2467,6 +2463,9 @@ function OnboardingPage() {
           <p className="hero-copy">
             This version drops the Expo web layer and runs as a straightforward React app over HTTPS.
           </p>
+          <Link className="secondary-button align-start" to="/backup">
+            Restore backup
+          </Link>
         </div>
       </section>
 
@@ -2489,6 +2488,112 @@ function OnboardingPage() {
           </button>
         </form>
       </section>
+    </div>
+  );
+}
+
+function BackupPage() {
+  const onboardingComplete = useDataSnapshot(() => db.dbIsOnboardingComplete());
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function handleRestore(file: File | undefined) {
+    if (!file) {
+      return;
+    }
+
+    if (!window.confirm('Restore this backup? Current app data on this device will be replaced.')) {
+      return;
+    }
+
+    setBusy(true);
+    setStatus('');
+    try {
+      const result = await restoreBackupFile(file);
+      const exportedDate = new Date(result.exportedAt).toLocaleString('en-GB');
+      setStatus(`Restored ${result.itemCount} saved item groups from ${exportedDate}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not restore that backup file.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="backup-shell">
+      <section className="page-header">
+        <div>
+          <p className="eyebrow">Backup</p>
+          <h2>Manual safety copy</h2>
+        </div>
+        <Link className="ghost-button" to={onboardingComplete ? '/today' : '/onboarding'}>
+          Back
+        </Link>
+      </section>
+
+      <section className="card">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Export</p>
+            <h3>Download your app data</h3>
+          </div>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => {
+              try {
+                const result = exportBackupFile();
+                setStatus(`Downloaded ${result.fileName} with ${result.itemCount} saved item groups.`);
+              } catch {
+                setStatus('Could not create a backup in this browser.');
+              }
+            }}
+          >
+            Download backup
+          </button>
+        </div>
+        <p className="muted-copy">
+          The file includes the app data saved in this browser. Keep it somewhere you already back up.
+        </p>
+      </section>
+
+      <section className="card">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Restore</p>
+            <h3>Load a backup file</h3>
+          </div>
+          {onboardingComplete ? (
+            <span className="metric-chip">App ready</span>
+          ) : (
+            <span className="metric-chip">Pre-setup</span>
+          )}
+        </div>
+
+        <label className="field">
+          <span>Backup file</span>
+          <input
+            accept="application/json,.json"
+            disabled={busy}
+            type="file"
+            onChange={(event) => {
+              void handleRestore(event.currentTarget.files?.[0]);
+              event.currentTarget.value = '';
+            }}
+          />
+        </label>
+      </section>
+
+      {status ? (
+        <section className="card">
+          <p className="muted-copy">{status}</p>
+          {onboardingComplete ? (
+            <Link className="primary-button align-start" to="/today">
+              Open today
+            </Link>
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -2653,6 +2758,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate replace to={onboardingComplete ? '/today' : '/onboarding'} />} />
+      <Route path="/backup" element={<BackupPage />} />
       <Route
         path="/onboarding"
         element={onboardingComplete ? <Navigate replace to="/today" /> : <OnboardingPage />}
