@@ -433,6 +433,13 @@ export function dbGetTasksForDate(date: string): DailyTask[] {
   return getActiveTasks(load<DailyTask>(KEY_TASKS).map(normalizeTask), date);
 }
 
+export function dbGetAllTasks(): DailyTask[] {
+  return load<DailyTask>(KEY_TASKS)
+    .map(normalizeTask)
+    .filter((task) => task.status !== 'dropped')
+    .sort((a, b) => a.date.localeCompare(b.date) || a.sortOrder - b.sortOrder);
+}
+
 export function dbGetTaskById(id: string): DailyTask | null {
   const task = load<DailyTask>(KEY_TASKS).map(normalizeTask).find((candidate) => candidate.id === id);
   return task ?? null;

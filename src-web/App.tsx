@@ -1961,118 +1961,216 @@ function CalendarPage() {
   );
 }
 
-function GoalCard({
-  goal,
-  weeklyFocus,
-  onEdit,
-  onMakeActive,
-  onQueue,
-  onPark,
-  onComplete,
-}: {
+type GoalTreeProject = Project & {
+  tasks: DailyTask[];
+};
+
+type GoalTreeNode = {
   goal: Goal;
-  weeklyFocus?: string | null;
-  onEdit: () => void;
-  onMakeActive: () => void;
-  onQueue: () => void;
-  onPark: () => void;
-  onComplete: () => void;
+  projects: GoalTreeProject[];
+  looseTasks: DailyTask[];
+  taskCount: number;
+  doneCount: number;
+};
+
+function GoalTree({
+  nodes,
+  selectedGoalId,
+  onSelectGoal,
+  onBack,
+  onEditGoal,
+  onSetGoalStatus,
+  onCompleteGoal,
+}: {
+  nodes: GoalTreeNode[];
+  selectedGoalId: string | null;
+  onSelectGoal: (goalId: string) => void;
+  onBack: () => void;
+  onEditGoal: (goal: Goal) => void;
+  onSetGoalStatus: (goalId: string, status: Exclude<GoalStatus, 'completed'>) => void;
+  onCompleteGoal: (goalId: string) => void;
 }) {
-  const priorityLabel = getGoalPriorityLabel(goal);
+  const selectedNode = nodes.find((node) => node.goal.id === selectedGoalId) ?? null;
+
+  if (!selectedNode) {
+    return (
+      <section className="goal-tree">
+        <div className="goal-tile-grid">
+          {nodes.map((node) => (
+            <button
+              className={`goal-tile ${node.goal.status === 'active' ? 'is-active' : ''}`}
+              key={node.goal.id}
+              type="button"
+              onClick={() => onSelectGoal(node.goal.id)}
+            >
+              <span className="eyebrow">{getGoalStatusLabel(node.goal.status)}</span>
+              <strong>{node.goal.title}</strong>
+              <span>{node.goal.targetOutcome}</span>
+              <span className="goal-tree-meta">
+                {node.projects.length} projects / {node.doneCount}/{node.taskCount} tasks
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  const { goal, projects, looseTasks, taskCount, doneCount } = selectedNode;
+  const progressLabel = taskCount === 0 ? 'No tasks yet' : `${doneCount}/${taskCount} tasks done`;
 
   return (
-    <section className={`card goal-card ${goal.status === 'active' ? 'is-active' : ''}`}>
-      <div className="section-header">
-        <div>
-          <p className="eyebrow">{getGoalStatusLabel(goal.status)}</p>
+    <section className="goal-tree is-expanded">
+      <div className="goal-tree-topbar">
+        <button className="ghost-button" type="button" onClick={onBack}>
+          All goals
+        </button>
+        <div className="inline-actions">
+          <button className="ghost-button" type="button" onClick={() => onEditGoal(goal)}>
+            Edit
+          </button>
+          {goal.status !== 'active' ? (
+            <button className="primary-button" type="button" onClick={() => onSetGoalStatus(goal.id, 'active')}>
+              Make active
+            </button>
+          ) : null}
+          {goal.status !== 'queued' && goal.status !== 'completed' ? (
+            <button className="secondary-button" type="button" onClick={() => onSetGoalStatus(goal.id, 'queued')}>
+              Queue
+            </button>
+          ) : null}
+          {goal.status !== 'parked' && goal.status !== 'completed' ? (
+            <button className="ghost-button" type="button" onClick={() => onSetGoalStatus(goal.id, 'parked')}>
+              Park
+            </button>
+          ) : null}
+          {goal.status !== 'completed' ? (
+            <button className="ghost-button danger-text" type="button" onClick={() => onCompleteGoal(goal.id)}>
+              Complete
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="goal-tree-focus">
+        <div className="goal-tree-root">
+          <span className="eyebrow">{getGoalStatusLabel(goal.status)} goal</span>
           <h3>{goal.title}</h3>
+          <p>{goal.targetOutcome}</p>
+          <div className="chips">
+            <span className="chip">{getGoalPriorityLabel(goal)}</span>
+            <span className="chip">{progressLabel}</span>
+            {goal.metric ? <span className="chip">{goal.metric}</span> : null}
+          </div>
         </div>
-        <span className="metric-chip">{priorityLabel}</span>
-      </div>
 
-      <p>{goal.targetOutcome}</p>
+        <div className="goal-tree-branches">
+          {projects.length === 0 && looseTasks.length === 0 ? (
+            <div className="goal-tree-empty">
+              <p className="eyebrow">Projects</p>
+              <p>Add projects from Today to start building the path under this goal.</p>
+            </div>
+          ) : null}
 
-      <div className="chips">
-        <span className="chip">Importance {GOAL_RATING_OPTIONS[goal.importance - 1].label}</span>
-        <span className="chip">Urgency {GOAL_RATING_OPTIONS[goal.urgency - 1].label}</span>
-        <span className="chip">Payoff {GOAL_RATING_OPTIONS[goal.payoff - 1].label}</span>
-        {goal.targetDate ? <span className="chip">Target {formatShortDate(goal.targetDate)}</span> : null}
-        {goal.metric ? <span className="chip">{goal.metric}</span> : null}
-      </div>
+          {projects.map((project) => {
+            const projectDone = project.tasks.filter((task) => task.status === 'done').length;
+            return (
+              <div className="project-branch" key={project.id}>
+                <div className="project-branch-header">
+                  <span className="project-dot" style={{ backgroundColor: project.color }} />
+                  <div>
+                    <span>{project.name}</span>
+                    <small>{projectDone}/{project.tasks.length} tasks</small>
+                  </div>
+                </div>
+                {project.tasks.length === 0 ? (
+                  <p className="muted-copy">No tasks allocated yet.</p>
+                ) : (
+                  <div className="tree-task-list">
+                    {project.tasks.map((task) => (
+                      <div className={`tree-task ${task.status === 'done' ? 'is-done' : ''}`} key={task.id}>
+                        <span className="tree-task-check">{task.status === 'done' ? '✓' : ''}</span>
+                        <span>{task.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
-      {goal.whyNow ? (
-        <div className="goal-copy-block">
-          <p className="eyebrow">Why now</p>
-          <p>{goal.whyNow}</p>
+          {looseTasks.length > 0 ? (
+            <div className="project-branch is-loose">
+              <div className="project-branch-header">
+                <span className="project-dot" />
+                <div>
+                  <span>Unallocated tasks</span>
+                  <small>{looseTasks.filter((task) => task.status === 'done').length}/{looseTasks.length} tasks</small>
+                </div>
+              </div>
+              <div className="tree-task-list">
+                {looseTasks.map((task) => (
+                  <div className={`tree-task ${task.status === 'done' ? 'is-done' : ''}`} key={task.id}>
+                    <span className="tree-task-check">{task.status === 'done' ? '✓' : ''}</span>
+                    <span>{task.title}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
-      ) : null}
-
-      {goal.status === 'active' && weeklyFocus ? (
-        <div className="goal-copy-block">
-          <p className="eyebrow">Weekly focus</p>
-          <p>{weeklyFocus}</p>
-        </div>
-      ) : null}
-
-      <div className="goal-copy-block">
-        <p className="eyebrow">Anchor</p>
-        <p>{goal.anchorWhy || 'No why anchor set yet.'}</p>
-        <p>{goal.anchorDrift || 'No drift anchor set yet.'}</p>
-      </div>
-
-      <div className="task-actions">
-        {goal.status !== 'active' ? (
-          <button className="primary-button" type="button" onClick={onMakeActive}>
-            Make active
-          </button>
-        ) : null}
-        {goal.status !== 'queued' && goal.status !== 'completed' ? (
-          <button className="secondary-button" type="button" onClick={onQueue}>
-            Move to queue
-          </button>
-        ) : null}
-        {goal.status !== 'parked' && goal.status !== 'completed' ? (
-          <button className="ghost-button" type="button" onClick={onPark}>
-            Park it
-          </button>
-        ) : null}
-        <button className="ghost-button" type="button" onClick={onEdit}>
-          Edit
-        </button>
-        <button className="ghost-button danger-text" type="button" onClick={onComplete}>
-          Complete
-        </button>
       </div>
     </section>
   );
 }
 
 function GoalsPage() {
-  const { goals, activeGoal, weeklyFocus, visions } = useDataSnapshot(() => {
+  const { goals, activeGoal, visions, treeNodes } = useDataSnapshot(() => {
     const goals = db.dbGetGoals();
     const activeGoal = goals.find((goal) => goal.status === 'active') ?? null;
+    const tasks = db.dbGetAllTasks();
+    const treeNodes = goals.map<GoalTreeNode>((goal) => {
+      const projects = db.dbGetProjects(goal.id).map<GoalTreeProject>((project) => ({
+        ...project,
+        tasks: tasks.filter((task) => task.projectId === project.id && task.status !== 'dropped'),
+      }));
+      const projectIds = new Set(projects.map((project) => project.id));
+      const looseTasks = tasks.filter(
+        (task) =>
+          task.goalId === goal.id &&
+          !projectIds.has(task.projectId ?? '') &&
+          task.status !== 'dropped' &&
+          task.taskType === 'goal'
+      );
+      const allTasks = [...projects.flatMap((project) => project.tasks), ...looseTasks];
+
+      return {
+        goal,
+        projects,
+        looseTasks,
+        taskCount: allTasks.length,
+        doneCount: allTasks.filter((task) => task.status === 'done').length,
+      };
+    });
+
     return {
       goals,
       activeGoal,
-      weeklyFocus: activeGoal ? db.dbGetCurrentWeeklyFocus(activeGoal.id) : null,
       visions: db.dbGetVisions(),
+      treeNodes,
     };
   });
 
   const [goalModalOpen, setGoalModalOpen] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
-  const [focusText, setFocusText] = useState(weeklyFocus?.focus ?? '');
+  const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
 
   useEffect(() => {
-    setFocusText(weeklyFocus?.focus ?? '');
-  }, [weeklyFocus?.focus]);
+    if (expandedGoalId && !goals.some((goal) => goal.id === expandedGoalId)) {
+      setExpandedGoalId(null);
+    }
+  }, [expandedGoalId, goals]);
 
-  const queuedGoals = goals.filter((goal) => goal.status === 'queued');
-  const parkedGoals = goals.filter((goal) => goal.status === 'parked');
-  const completedGoals = goals.filter((goal) => goal.status === 'completed');
-  const recommendedGoal = [...queuedGoals, ...parkedGoals].sort(
-    (a, b) => getGoalPriorityScore(b) - getGoalPriorityScore(a)
-  )[0] ?? null;
   const defaultGoalStatus: Exclude<GoalStatus, 'completed'> = activeGoal ? 'queued' : 'active';
 
   function openCreateGoal() {
@@ -2089,8 +2187,8 @@ function GoalsPage() {
     <>
       <section className="page-header">
         <div>
-          <p className="eyebrow">Goal vault</p>
-          <h2>{activeGoal ? activeGoal.title : 'Capture all goals, run one at a time'}</h2>
+          <p className="eyebrow">Goal map</p>
+          <h2>{expandedGoalId ? 'Goal / projects / tasks' : 'Choose a broad goal'}</h2>
         </div>
         <div className="header-actions">
           <button className="primary-button" type="button" onClick={openCreateGoal}>
@@ -2101,163 +2199,28 @@ function GoalsPage() {
 
       <VisionsSection visions={visions} activeGoal={activeGoal} />
 
-      {recommendedGoal ? (
-        <section className="card banner-card">
-          <div>
-            <p className="eyebrow">Recommended next</p>
-            <h3>{recommendedGoal.title}</h3>
-            <p className="muted-copy">
-              {getGoalPriorityLabel(recommendedGoal)} with strong importance/payoff signals.
-            </p>
-          </div>
-          <div className="inline-actions">
-            <button
-              className="primary-button"
-              type="button"
-              onClick={() => mutate(() => db.dbSetGoalStatus(recommendedGoal.id, 'active'))}
-            >
-              Make active
-            </button>
-            <button className="ghost-button" type="button" onClick={() => openEditGoal(recommendedGoal)}>
-              Review goal
-            </button>
-          </div>
-        </section>
-      ) : null}
-
-      {activeGoal ? (
-        <>
-          <GoalCard
-            goal={activeGoal}
-            weeklyFocus={weeklyFocus?.focus ?? null}
-            onEdit={() => openEditGoal(activeGoal)}
-            onMakeActive={() => {}}
-            onQueue={() => mutate(() => db.dbSetGoalStatus(activeGoal.id, 'queued'))}
-            onPark={() => mutate(() => db.dbSetGoalStatus(activeGoal.id, 'parked'))}
-            onComplete={() => {
-              if (window.confirm('Complete this goal and move it out of the active slot?')) {
-                mutate(() => db.dbCompleteGoal(activeGoal.id));
-              }
-            }}
-          />
-
-          <section className="card">
-            <div className="section-header">
-              <div>
-                <p className="eyebrow">This week</p>
-                <h3>Weekly focus</h3>
-              </div>
-            </div>
-            <form
-              className="stack"
-              onSubmit={(event) => {
-                event.preventDefault();
-                mutate(() => db.dbUpsertWeeklyFocus(activeGoal.id, focusText.trim()));
-              }}
-            >
-              <textarea
-                rows={3}
-                value={focusText}
-                onChange={(event) => setFocusText(event.target.value)}
-                placeholder="What is the one move for this week?"
-              />
-              <button className="primary-button" type="submit" disabled={!focusText.trim()}>
-                Save weekly focus
-              </button>
-            </form>
-          </section>
-        </>
-      ) : (
+      {goals.length === 0 ? (
         <section className="card empty-card">
-          <h3>No active goal yet</h3>
+          <h3>No goals yet</h3>
           <p className="muted-copy">
-            Keep many goals in the vault, but choose one to drive Today, Calendar, and Focus.
+            Add a broad goal first. Projects and tasks will sit underneath it as the path becomes clearer.
           </p>
         </section>
+      ) : (
+        <GoalTree
+          nodes={treeNodes}
+          selectedGoalId={expandedGoalId}
+          onSelectGoal={setExpandedGoalId}
+          onBack={() => setExpandedGoalId(null)}
+          onEditGoal={openEditGoal}
+          onSetGoalStatus={(goalId, status) => mutate(() => db.dbSetGoalStatus(goalId, status))}
+          onCompleteGoal={(goalId) => {
+            if (window.confirm('Complete this goal and collapse it out of the active map?')) {
+              mutate(() => db.dbCompleteGoal(goalId));
+            }
+          }}
+        />
       )}
-
-      <section className="goal-section">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Queued</p>
-            <h3>Likely next</h3>
-          </div>
-          <span className="metric-chip">{queuedGoals.length}</span>
-        </div>
-        {queuedGoals.length === 0 ? (
-          <section className="card empty-card">
-            <p className="muted-copy">Queue the goals that are close enough to matter, but not steering execution today.</p>
-          </section>
-        ) : (
-          <div className="goal-grid">
-            {queuedGoals.map((goal) => (
-              <GoalCard
-                key={goal.id}
-                goal={goal}
-                onEdit={() => openEditGoal(goal)}
-                onMakeActive={() => mutate(() => db.dbSetGoalStatus(goal.id, 'active'))}
-                onQueue={() => mutate(() => db.dbSetGoalStatus(goal.id, 'queued'))}
-                onPark={() => mutate(() => db.dbSetGoalStatus(goal.id, 'parked'))}
-                onComplete={() => mutate(() => db.dbCompleteGoal(goal.id))}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="goal-section">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Parked</p>
-            <h3>Captured without distraction</h3>
-          </div>
-          <span className="metric-chip">{parkedGoals.length}</span>
-        </div>
-        {parkedGoals.length === 0 ? (
-          <section className="card empty-card">
-            <p className="muted-copy">Park goals that matter, but should not compete for attention yet.</p>
-          </section>
-        ) : (
-          <div className="goal-grid">
-            {parkedGoals.map((goal) => (
-              <GoalCard
-                key={goal.id}
-                goal={goal}
-                onEdit={() => openEditGoal(goal)}
-                onMakeActive={() => mutate(() => db.dbSetGoalStatus(goal.id, 'active'))}
-                onQueue={() => mutate(() => db.dbSetGoalStatus(goal.id, 'queued'))}
-                onPark={() => mutate(() => db.dbSetGoalStatus(goal.id, 'parked'))}
-                onComplete={() => mutate(() => db.dbCompleteGoal(goal.id))}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {completedGoals.length > 0 ? (
-        <section className="goal-section">
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">Completed</p>
-              <h3>Finished goals</h3>
-            </div>
-            <span className="metric-chip">{completedGoals.length}</span>
-          </div>
-          <div className="goal-grid">
-            {completedGoals.map((goal) => (
-              <section className="card goal-card" key={goal.id}>
-                <p className="eyebrow">Completed</p>
-                <h3>{goal.title}</h3>
-                <p>{goal.targetOutcome}</p>
-                <div className="chips">
-                  <span className="chip">{getGoalPriorityLabel(goal)}</span>
-                  {goal.targetDate ? <span className="chip">Target {formatShortDate(goal.targetDate)}</span> : null}
-                </div>
-              </section>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       <GoalModal
         open={goalModalOpen}

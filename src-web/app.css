@@ -251,6 +251,149 @@ a {
   margin: 0;
 }
 
+.goal-tree {
+  display: grid;
+  gap: 1rem;
+}
+
+.goal-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.goal-tile {
+  display: grid;
+  gap: 0.7rem;
+  min-height: 13rem;
+  padding: 1.2rem;
+  text-align: left;
+  border: 1px solid rgba(26, 26, 26, 0.08);
+  border-radius: 1.1rem;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 28px rgba(31, 35, 45, 0.06);
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.goal-tile:hover {
+  transform: translateY(-3px);
+  border-color: rgba(59, 91, 219, 0.32);
+  box-shadow: 0 18px 36px rgba(31, 35, 45, 0.1);
+}
+
+.goal-tile.is-active {
+  background: linear-gradient(135deg, rgba(59, 91, 219, 0.11), rgba(255, 255, 255, 0.96));
+}
+
+.goal-tile strong {
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+
+.goal-tree-meta {
+  align-self: end;
+  color: #6b6b6e;
+  font-weight: 700;
+}
+
+.goal-tree-topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.goal-tree-focus {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.85fr) minmax(0, 1.4fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.goal-tree-root,
+.project-branch,
+.goal-tree-empty {
+  position: relative;
+  padding: 1.2rem;
+  border: 1px solid rgba(26, 26, 26, 0.08);
+  border-radius: 1.1rem;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.goal-tree-root {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.goal-tree-root h3,
+.goal-tree-root p,
+.goal-tree-empty p {
+  margin: 0;
+}
+
+.goal-tree-branches {
+  display: grid;
+  gap: 1rem;
+  padding-left: 1.1rem;
+  border-left: 2px solid rgba(59, 91, 219, 0.22);
+}
+
+.project-branch::before,
+.goal-tree-empty::before {
+  content: "";
+  position: absolute;
+  top: 2rem;
+  left: -1.2rem;
+  width: 1.2rem;
+  border-top: 2px solid rgba(59, 91, 219, 0.22);
+}
+
+.project-branch-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.8rem;
+  font-weight: 800;
+}
+
+.project-branch-header small {
+  display: block;
+  margin-top: 0.1rem;
+  color: #6b6b6e;
+  font-weight: 600;
+}
+
+.tree-task-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.tree-task {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.85rem;
+  background: #f7f6f3;
+}
+
+.tree-task.is-done {
+  color: #6b6b6e;
+  text-decoration: line-through;
+}
+
+.tree-task-check {
+  display: inline-grid;
+  place-items: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  border: 2px solid #2f9e44;
+  color: #2f9e44;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .task-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -630,8 +773,20 @@ a {
 
   .stats-grid,
   .form-grid,
-  .goal-grid {
+  .goal-grid,
+  .goal-tile-grid,
+  .goal-tree-focus {
     grid-template-columns: 1fr;
+  }
+
+  .goal-tree-branches {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .project-branch::before,
+  .goal-tree-empty::before {
+    display: none;
   }
 }
 
