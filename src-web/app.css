@@ -632,3 +632,125 @@ a {
     padding: 0.55rem;
   }
 }
+
+/* ── Habits ─────────────────────────────────────────────────────────────── */
+.habit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(26, 26, 26, 0.08);
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.habit-row.is-dimmed { opacity: 0.55; }
+.habit-row.is-done { background: rgba(47, 158, 68, 0.08); }
+
+.habit-check {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 2px solid rgba(26, 26, 26, 0.25);
+  background: transparent;
+  color: #fff;
+  font-weight: 700;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.habit-check.is-done {
+  background: #2F9E44;
+  border-color: #2F9E44;
+}
+
+.habit-body {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.habit-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.habit-title { font-weight: 600; }
+.habit-streak { font-size: 0.85rem; color: #E8590C; }
+.habit-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: rgba(26, 26, 26, 0.6);
+}
+.habit-cue { font-style: italic; }
+
+.habit-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.habit-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.habit-dot.is-done { background: #2F9E44; }
+.habit-dot.is-miss { background: #F4B400; }
+.habit-dot.is-skip { background: rgba(26, 26, 26, 0.25); }
+.habit-dot.is-off  { background: rgba(26, 26, 26, 0.1); }
+
+.habit-off-details { margin-top: 0.25rem; }
+.habit-off-details summary { cursor: pointer; padding: 0.25rem 0; }
+
+/* ── Visions ────────────────────────────────────────────────────────────── */
+.vision-card { border-left: 3px solid #7950F2; }
+.vision-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(26, 26, 26, 0.08);
+  background: rgba(255, 255, 255, 0.5);
+}
+.vision-row.is-active {
+  border-color: #7950F2;
+  background: rgba(121, 80, 242, 0.06);
+}
+.vision-row-body { flex: 1; min-width: 0; }
+.vision-title-row { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; }
+.vision-title { font-weight: 600; font-size: 1.05rem; }
+.vision-identity {
+  font-style: italic;
+  color: rgba(26, 26, 26, 0.7);
+  margin: 0.25rem 0;
+}
+
+/* ── Field helpers for modal forms ─────────────────────────────────────── */
+.field { display: flex; flex-direction: column; gap: 0.35rem; }
+.field > span { font-weight: 600; font-size: 0.9rem; }
+.field > small { color: rgba(26, 26, 26, 0.6); }
+.field input,
+.field textarea,
+.field select {
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  border: 1px solid rgba(26, 26, 26, 0.15);
+  background: rgba(255, 255, 255, 0.9);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+}

@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'focus.db';
 const SCHEMA_VERSION_KEY = 'schema_version';
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
@@ -65,6 +65,12 @@ const migrations: Migration[] = [
     version: 9,
     run: (db) => {
       ensurePlannerShape(db);
+    },
+  },
+  {
+    version: 10,
+    run: (db) => {
+      ensureLifeArchitectureShape(db);
     },
   },
 ];
@@ -143,6 +149,7 @@ function runMigrations(db: SQLite.SQLiteDatabase): void {
   ensureProjectsShape(db);
   ensureControlCenterShape(db);
   ensurePlannerShape(db);
+  ensureLifeArchitectureShape(db);
 
   if (getSchemaVersion(db) < CURRENT_SCHEMA_VERSION) {
     setSchemaVersion(db, CURRENT_SCHEMA_VERSION);
@@ -520,6 +527,98 @@ function ensurePlannerShape(db: SQLite.SQLiteDatabase): void {
     'break_duration_minutes',
     'ALTER TABLE daily_tasks ADD COLUMN break_duration_minutes INTEGER NOT NULL DEFAULT 10'
   );
+}
+
+function ensureLifeArchitectureShape(db: SQLite.SQLiteDatabase): void {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS visions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      identity_statement TEXT NOT NULL DEFAULT '',
+      color TEXT NOT NULL DEFAULT '#3B5BDB',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_visions_status_sort
+      ON visions(status, sort_order);
+
+    CREATE TABLE IF NOT EXISTS habits (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      cue TEXT NOT NULL DEFAULT '',
+      cue_type TEXT NOT NULL DEFAULT 'time',
+      stack_anchor_habit_id TEXT,
+      identity_statement TEXT NOT NULL DEFAULT '',
+      cadence_type TEXT NOT NULL DEFAULT 'daily',
+      cadence_target INTEGER NOT NULL DEFAULT 7,
+      cadence_days TEXT NOT NULL DEFAULT '',
+      goal_id TEXT,
+      vision_id TEXT,
+      status TEXT NOT NULL DEFAULT 'learning',
+      started_at INTEGER NOT NULL,
+      graduated_at INTEGER,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (goal_id) REFERENCES goals(id),
+      FOREIGN KEY (vision_id) REFERENCES visions(id),
+      FOREIGN KEY (stack_anchor_habit_id) REFERENCES habits(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_habits_status_sort
+      ON habits(status, sort_order);
+
+    CREATE TABLE IF NOT EXISTS habit_completions (
+      id TEXT PRIMARY KEY,
+      habit_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      status TEXT NOT NULL,
+      completed_at INTEGER NOT NULL,
+      FOREIGN KEY (habit_id) REFERENCES habits(id),
+      UNIQUE(habit_id, date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_habit_completions_habit_date
+      ON habit_completions(habit_id, date DESC);
+    CREATE INDEX IF NOT EXISTS idx_habit_completions_date
+      ON habit_completions(date);
+  `);
+
+  ensureColumn(
+    db,
+    'goals',
+    'vision_id',
+    'ALTER TABLE goals ADD COLUMN vision_id TEXT REFERENCES visions(id)'
+  );
+
+  // Make projects.goal_id nullable by recreating the table.
+  // SQLite lacks a direct "drop NOT NULL" — standard recreate-copy-rename pattern.
+  const projectsInfo = db.getAllSync<{ name: string; notnull: number }>(
+    'PRAGMA table_info(projects)'
+  );
+  const goalIdCol = projectsInfo.find((c) => c.name === 'goal_id');
+  if (goalIdCol && goalIdCol.notnull === 1) {
+    db.execSync(`
+      CREATE TABLE projects_new (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT '#3B5BDB',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (goal_id) REFERENCES goals(id)
+      );
+
+      INSERT INTO projects_new (id, goal_id, name, color, sort_order, created_at)
+        SELECT id, goal_id, name, color, sort_order, created_at FROM projects;
+
+      DROP TABLE projects;
+      ALTER TABLE projects_new RENAME TO projects;
+
+      CREATE INDEX IF NOT EXISTS idx_projects_goal_id ON projects(goal_id);
+    `);
+  }
 }
 
 function ensureColumn(

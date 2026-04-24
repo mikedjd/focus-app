@@ -18,9 +18,16 @@ import type {
   Goal,
   GoalStatus,
   GoalWriteInput,
+  Habit,
+  HabitCadenceType,
+  HabitCueType,
+  HabitTodayView,
+  HabitWriteInput,
   OnboardingDraft,
   Project,
   ResumeContext,
+  Vision,
+  VisionWriteInput,
 } from '../src/types';
 import {
   formatDate,
@@ -776,6 +783,557 @@ function TaskRow({
   );
 }
 
+// ─── Habits UI ────────────────────────────────────────────────────────────────
+
+const CADENCE_OPTIONS: Array<{ value: HabitCadenceType; label: string }> = [
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekdays', label: 'Weekdays' },
+  { value: 'n_per_week', label: 'N per week' },
+  { value: 'custom_days', label: 'Custom days' },
+];
+
+const CUE_OPTIONS: Array<{ value: HabitCueType; label: string; hint: string }> = [
+  { value: 'stack', label: 'After...', hint: 'e.g. "after morning coffee"' },
+  { value: 'time', label: 'At time', hint: 'e.g. "8:00"' },
+  { value: 'location', label: 'At place', hint: 'e.g. "at desk"' },
+  { value: 'free', label: 'None', hint: 'Anchor-free (hardest)' },
+];
+
+const DOT_CLASS: Record<'done' | 'miss' | 'skip' | 'off', string> = {
+  done: 'habit-dot is-done',
+  miss: 'habit-dot is-miss',
+  skip: 'habit-dot is-skip',
+  off: 'habit-dot is-off',
+};
+
+function HabitModal({
+  open,
+  initial,
+  goals,
+  visions,
+  onClose,
+  onSubmit,
+  onDelete,
+}: {
+  open: boolean;
+  initial: Habit | null;
+  goals: Goal[];
+  visions: Vision[];
+  onClose: () => void;
+  onSubmit: (input: HabitWriteInput) => void;
+  onDelete?: () => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [cue, setCue] = useState('');
+  const [cueType, setCueType] = useState<HabitCueType>('stack');
+  const [identity, setIdentity] = useState('');
+  const [cadenceType, setCadenceType] = useState<HabitCadenceType>('daily');
+  const [cadenceTarget, setCadenceTarget] = useState(3);
+  const [cadenceDays, setCadenceDays] = useState<number[]>([]);
+  const [goalId, setGoalId] = useState<string | null>(null);
+  const [visionId, setVisionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle(initial?.title ?? '');
+    setCue(initial?.cue ?? '');
+    setCueType(initial?.cueType ?? 'stack');
+    setIdentity(initial?.identityStatement ?? '');
+    setCadenceType(initial?.cadenceType ?? 'daily');
+    setCadenceTarget(initial?.cadenceTarget ?? 3);
+    setCadenceDays(initial?.cadenceDays ?? []);
+    setGoalId(initial?.goalId ?? null);
+    setVisionId(initial?.visionId ?? null);
+  }, [open, initial]);
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!title.trim()) return;
+    onSubmit({
+      title: title.trim(),
+      cue: cue.trim(),
+      cueType,
+      identityStatement: identity.trim(),
+      cadenceType,
+      cadenceTarget,
+      cadenceDays,
+      goalId,
+      visionId,
+    });
+    onClose();
+  }
+
+  return (
+    <Modal open={open} title={initial ? 'Edit habit' : 'New habit'} onClose={onClose}>
+      <form onSubmit={submit} className="stack">
+        <label className="field">
+          <span>Habit (2-min version)</span>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Do 2 pushups"
+            autoFocus
+          />
+          <small className="muted-copy">Start absurdly small. Scale later.</small>
+        </label>
+
+        <label className="field">
+          <span>I am someone who... (optional)</span>
+          <input
+            value={identity}
+            onChange={(e) => setIdentity(e.target.value)}
+            placeholder="...moves their body every morning"
+          />
+        </label>
+
+        <div className="field">
+          <span>Cue</span>
+          <div className="chips">
+            {CUE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`chip ${cueType === opt.value ? 'is-active' : ''}`}
+                onClick={() => setCueType(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {cueType !== 'free' ? (
+            <input
+              value={cue}
+              onChange={(e) => setCue(e.target.value)}
+              placeholder={CUE_OPTIONS.find((o) => o.value === cueType)?.hint ?? ''}
+            />
+          ) : null}
+        </div>
+
+        <div className="field">
+          <span>Cadence</span>
+          <div className="chips">
+            {CADENCE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`chip ${cadenceType === opt.value ? 'is-active' : ''}`}
+                onClick={() => setCadenceType(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {cadenceType === 'n_per_week' ? (
+            <label className="field">
+              <span>Target per week</span>
+              <input
+                type="number"
+                min={1}
+                max={7}
+                value={cadenceTarget}
+                onChange={(e) => setCadenceTarget(Math.max(1, Math.min(7, Number(e.target.value) || 1)))}
+              />
+            </label>
+          ) : null}
+          {cadenceType === 'custom_days' ? (
+            <div className="chips">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => (
+                <button
+                  key={d}
+                  type="button"
+                  className={`chip ${cadenceDays.includes(i) ? 'is-active' : ''}`}
+                  onClick={() =>
+                    setCadenceDays((prev) =>
+                      prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i].sort()
+                    )
+                  }
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        {visions.length > 0 ? (
+          <label className="field">
+            <span>Ladder to vision (optional)</span>
+            <select value={visionId ?? ''} onChange={(e) => setVisionId(e.target.value || null)}>
+              <option value="">Standalone</option>
+              {visions.map((v) => (
+                <option key={v.id} value={v.id}>{v.title}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        {goals.length > 0 ? (
+          <label className="field">
+            <span>Link to goal (optional)</span>
+            <select value={goalId ?? ''} onChange={(e) => setGoalId(e.target.value || null)}>
+              <option value="">Standalone</option>
+              {goals.filter((g) => g.id !== STANDALONE_TASKS_GOAL_ID).map((g) => (
+                <option key={g.id} value={g.id}>{g.title}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        <div className="modal-actions">
+          {initial && onDelete ? (
+            <button
+              type="button"
+              className="ghost-button danger-text"
+              onClick={() => {
+                if (window.confirm(`Delete habit "${initial.title}" and all its history?`)) {
+                  onDelete();
+                  onClose();
+                }
+              }}
+            >
+              Delete
+            </button>
+          ) : null}
+          <button type="button" className="ghost-button" onClick={onClose}>Cancel</button>
+          <button type="submit" className="primary-button" disabled={!title.trim()}>
+            {initial ? 'Save' : 'Create habit'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function HabitsSection({
+  habitsToday,
+  goals,
+  visions,
+}: {
+  habitsToday: HabitTodayView[];
+  goals: Goal[];
+  visions: Vision[];
+}) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Habit | null>(null);
+
+  const scheduled = habitsToday.filter((h) => h.scheduledToday);
+  const offToday = habitsToday.filter((h) => !h.scheduledToday);
+  const doneCount = scheduled.filter((h) => h.todayStatus === 'done').length;
+
+  function toggleDone(view: HabitTodayView) {
+    if (view.todayStatus === 'done') {
+      mutate(() => db.dbClearHabitCompletion(view.habit.id, todayString()));
+    } else {
+      mutate(() => db.dbLogHabitCompletion(view.habit.id, todayString(), 'done'));
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">Habits</p>
+          <h3>{habitsToday.length === 0 ? 'Build something repeatable' : 'Small reps, compounding'}</h3>
+        </div>
+        <div className="inline-actions">
+          {scheduled.length > 0 ? (
+            <span className="metric-chip">{doneCount}/{scheduled.length}</span>
+          ) : null}
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => {
+              setEditing(null);
+              setModalOpen(true);
+            }}
+          >
+            Add habit
+          </button>
+        </div>
+      </div>
+
+      {habitsToday.length === 0 ? (
+        <p className="muted-copy">
+          Habits are repeated, cue-anchored actions. Start with one 2-minute habit. Science says automaticity averages ~66 days — not 21.
+        </p>
+      ) : (
+        <div className="stack">
+          {scheduled.map((view) => (
+            <HabitRow key={view.habit.id} view={view} onToggle={() => toggleDone(view)} onEdit={() => { setEditing(view.habit); setModalOpen(true); }} />
+          ))}
+          {offToday.length > 0 ? (
+            <details className="habit-off-details">
+              <summary className="muted-copy">Not scheduled today ({offToday.length})</summary>
+              <div className="stack">
+                {offToday.map((view) => (
+                  <HabitRow key={view.habit.id} view={view} onToggle={() => toggleDone(view)} onEdit={() => { setEditing(view.habit); setModalOpen(true); }} dimmed />
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      )}
+
+      <HabitModal
+        open={modalOpen}
+        initial={editing}
+        goals={goals}
+        visions={visions}
+        onClose={() => setModalOpen(false)}
+        onSubmit={(input) => {
+          if (editing) {
+            mutate(() => db.dbUpdateHabit(editing.id, input));
+          } else {
+            mutate(() => db.dbCreateHabit(input));
+          }
+        }}
+        onDelete={editing ? () => mutate(() => db.dbDeleteHabit(editing.id)) : undefined}
+      />
+    </section>
+  );
+}
+
+function HabitRow({
+  view,
+  onToggle,
+  onEdit,
+  dimmed = false,
+}: {
+  view: HabitTodayView;
+  onToggle: () => void;
+  onEdit: () => void;
+  dimmed?: boolean;
+}) {
+  const { habit, todayStatus, streak, recentDots } = view;
+  const done = todayStatus === 'done';
+  return (
+    <div className={`habit-row ${dimmed ? 'is-dimmed' : ''} ${done ? 'is-done' : ''}`}>
+      <button
+        type="button"
+        className={`habit-check ${done ? 'is-done' : ''}`}
+        onClick={onToggle}
+        aria-label={done ? 'Mark not done' : 'Mark done'}
+      >
+        {done ? '✓' : ''}
+      </button>
+      <button type="button" className="habit-body" onClick={onEdit}>
+        <div className="habit-title-row">
+          <span className="habit-title">{habit.title}</span>
+          {streak > 0 ? <span className="habit-streak">🔥 {streak}</span> : null}
+        </div>
+        <div className="habit-meta">
+          {habit.cue ? <span className="habit-cue">{habit.cueType === 'stack' ? 'after ' : ''}{habit.cue}</span> : null}
+          <span className="habit-dots">
+            {recentDots.map((kind, i) => (
+              <span key={i} className={DOT_CLASS[kind]} />
+            ))}
+          </span>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+// ─── Visions UI ───────────────────────────────────────────────────────────────
+
+function VisionModal({
+  open,
+  initial,
+  onClose,
+  onSubmit,
+  onArchive,
+}: {
+  open: boolean;
+  initial: Vision | null;
+  onClose: () => void;
+  onSubmit: (input: VisionWriteInput) => void;
+  onArchive?: () => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [identity, setIdentity] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle(initial?.title ?? '');
+    setDescription(initial?.description ?? '');
+    setIdentity(initial?.identityStatement ?? '');
+  }, [open, initial]);
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!title.trim()) return;
+    onSubmit({ title: title.trim(), description: description.trim(), identityStatement: identity.trim() });
+    onClose();
+  }
+
+  return (
+    <Modal open={open} title={initial ? 'Edit vision' : 'New vision'} onClose={onClose}>
+      <form onSubmit={submit} className="stack">
+        <label className="field">
+          <span>Vision (1–5 years out)</span>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Financial independence"
+            autoFocus
+          />
+        </label>
+        <label className="field">
+          <span>Why it matters</span>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="The life this unlocks..."
+            rows={3}
+          />
+        </label>
+        <label className="field">
+          <span>I am someone who... (identity)</span>
+          <input
+            value={identity}
+            onChange={(e) => setIdentity(e.target.value)}
+            placeholder="...builds wealth patiently"
+          />
+        </label>
+        <div className="modal-actions">
+          {initial && onArchive ? (
+            <button
+              type="button"
+              className="ghost-button danger-text"
+              onClick={() => {
+                if (window.confirm(`Archive vision "${initial.title}"? Linked goals and habits will be unlinked.`)) {
+                  onArchive();
+                  onClose();
+                }
+              }}
+            >
+              Archive
+            </button>
+          ) : null}
+          <button type="button" className="ghost-button" onClick={onClose}>Cancel</button>
+          <button type="submit" className="primary-button" disabled={!title.trim()}>
+            {initial ? 'Save' : 'Create vision'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function VisionsSection({
+  visions,
+  activeGoal,
+}: {
+  visions: Vision[];
+  activeGoal: Goal | null;
+}) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Vision | null>(null);
+
+  const activeVision = activeGoal?.visionId ? visions.find((v) => v.id === activeGoal.visionId) ?? null : null;
+
+  return (
+    <section className="card vision-card">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">Vision</p>
+          <h3>{visions.length === 0 ? 'Give your goal somewhere to ladder to' : 'Long-term direction'}</h3>
+        </div>
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={() => {
+            setEditing(null);
+            setModalOpen(true);
+          }}
+        >
+          Add vision
+        </button>
+      </div>
+
+      {visions.length === 0 ? (
+        <p className="muted-copy">
+          A vision is the 1–5 year direction your active goal serves. Without one, goals feel arbitrary.
+        </p>
+      ) : (
+        <div className="stack">
+          {visions.map((v) => {
+            const isActive = activeVision?.id === v.id;
+            return (
+              <div key={v.id} className={`vision-row ${isActive ? 'is-active' : ''}`}>
+                <div className="vision-row-body">
+                  <div className="vision-title-row">
+                    <span className="vision-title">{v.title}</span>
+                    {isActive ? <span className="metric-chip">Current ladder</span> : null}
+                  </div>
+                  {v.identityStatement ? <p className="vision-identity">I am someone who {v.identityStatement}</p> : null}
+                  {v.description ? <p className="muted-copy">{v.description}</p> : null}
+                </div>
+                <div className="inline-actions">
+                  {activeGoal && !isActive ? (
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() =>
+                        mutate(() =>
+                          db.dbUpdateGoal(activeGoal.id, {
+                            title: activeGoal.title,
+                            targetOutcome: activeGoal.targetOutcome,
+                            targetDate: activeGoal.targetDate,
+                            metric: activeGoal.metric,
+                            why: activeGoal.why,
+                            practicalReason: activeGoal.practicalReason,
+                            emotionalReason: activeGoal.emotionalReason,
+                            costOfDrift: activeGoal.costOfDrift,
+                            anchorWhy: activeGoal.anchorWhy,
+                            anchorDrift: activeGoal.anchorDrift,
+                            importance: activeGoal.importance,
+                            urgency: activeGoal.urgency,
+                            payoff: activeGoal.payoff,
+                            whyNow: activeGoal.whyNow,
+                            visionId: v.id,
+                          })
+                        )
+                      }
+                    >
+                      Ladder goal here
+                    </button>
+                  ) : null}
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => {
+                      setEditing(v);
+                      setModalOpen(true);
+                    }}
+                  >
+                    Edit
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <VisionModal
+        open={modalOpen}
+        initial={editing}
+        onClose={() => setModalOpen(false)}
+        onSubmit={(input) => {
+          if (editing) {
+            mutate(() => db.dbUpdateVision(editing.id, input));
+          } else {
+            mutate(() => db.dbCreateVision(input));
+          }
+        }}
+        onArchive={editing ? () => mutate(() => db.dbArchiveVision(editing.id)) : undefined}
+      />
+    </section>
+  );
+}
+
 function AppShell() {
   const reviewDue = useDataSnapshot(() => db.dbIsReviewDue());
 
@@ -823,6 +1381,9 @@ function TodayPage() {
     projects,
     brainDumpItems,
     resumeContext,
+    habitsToday,
+    visions,
+    goals,
   } = useDataSnapshot(() => {
     const activeGoal = db.dbGetActiveGoal();
     return {
@@ -832,6 +1393,9 @@ function TodayPage() {
       projects: activeGoal ? db.dbGetProjects(activeGoal.id) : [],
       brainDumpItems: db.dbGetBrainDumpItems(),
       resumeContext: db.dbGetResumeContext(),
+      habitsToday: db.dbGetTodayHabits(),
+      visions: db.dbGetVisions(),
+      goals: db.dbGetGoals(),
     };
   });
 
@@ -1071,6 +1635,8 @@ function TodayPage() {
           </div>
         )}
       </section>
+
+      <HabitsSection habitsToday={habitsToday} goals={goals} visions={visions} />
 
       <section className="card">
         <div className="section-header">
@@ -1488,13 +2054,14 @@ function GoalCard({
 }
 
 function GoalsPage() {
-  const { goals, activeGoal, weeklyFocus } = useDataSnapshot(() => {
+  const { goals, activeGoal, weeklyFocus, visions } = useDataSnapshot(() => {
     const goals = db.dbGetGoals();
     const activeGoal = goals.find((goal) => goal.status === 'active') ?? null;
     return {
       goals,
       activeGoal,
       weeklyFocus: activeGoal ? db.dbGetCurrentWeeklyFocus(activeGoal.id) : null,
+      visions: db.dbGetVisions(),
     };
   });
 
@@ -1537,6 +2104,8 @@ function GoalsPage() {
           </button>
         </div>
       </section>
+
+      <VisionsSection visions={visions} activeGoal={activeGoal} />
 
       {recommendedGoal ? (
         <section className="card banner-card">

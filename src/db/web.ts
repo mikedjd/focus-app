@@ -15,9 +15,16 @@ import type {
   Goal,
   GoalStatus,
   GoalWriteInput,
+  Habit,
+  HabitCompletion,
+  HabitCompletionStatus,
+  HabitTodayView,
+  HabitWriteInput,
   Project,
   ResumeContext,
   TaskWriteResult,
+  Vision,
+  VisionWriteInput,
   WeeklyFocus,
   WeeklyReview,
 } from '../types';
@@ -47,6 +54,9 @@ const KEY_FOCUSES = 'adhd_focuses';
 const KEY_REVIEWS = 'adhd_reviews';
 const KEY_DAILY_REVIEWS = 'adhd_daily_reviews';
 const KEY_PROJECTS = 'adhd_projects';
+const KEY_VISIONS = 'adhd_visions';
+const KEY_HABITS = 'adhd_habits';
+const KEY_HABIT_COMPLETIONS = 'adhd_habit_completions';
 const KEY_BRAIN_DUMP = 'adhd_brain_dump';
 const KEY_FOCUS_SESSIONS = 'adhd_focus_sessions';
 const KEY_CTX_PREFIX = 'adhd_ctx_';
@@ -148,6 +158,7 @@ function normalizeGoalInput(input: GoalWriteInput) {
     urgency: clampGoalRating(input.urgency, 1),
     payoff: clampGoalRating(input.payoff, 2),
     whyNow: cleanText(input.whyNow),
+    visionId: input.visionId ?? null,
   };
 }
 
@@ -178,6 +189,7 @@ function normalizeStoredGoal(goal: Goal | (Partial<Goal> & { id: string; title: 
     currentFrictionMinutes: (goal as Goal).currentFrictionMinutes ?? 2,
     weeklySeatedSeconds: (goal as Goal).weeklySeatedSeconds ?? 0,
     weeklySeatedWeekOf: (goal as Goal).weeklySeatedWeekOf ?? '',
+    visionId: (goal as Goal).visionId ?? null,
   };
 }
 
@@ -249,6 +261,7 @@ function ensureStandaloneTaskGoal(goals: Goal[]): Goal[] {
       currentFrictionMinutes: 2,
       weeklySeatedSeconds: 0,
       weeklySeatedWeekOf: '',
+      visionId: null,
     },
   ];
 }
@@ -291,6 +304,7 @@ export function dbCreateGoal(
     currentFrictionMinutes: 2,
     weeklySeatedSeconds: 0,
     weeklySeatedWeekOf: '',
+    visionId: n.visionId ?? null,
   };
   const updatedGoals =
     nextStatus === 'active'
@@ -323,6 +337,7 @@ export function dbUpdateGoal(id: string, input: GoalWriteInput): boolean {
           urgency: n.urgency,
           payoff: n.payoff,
           whyNow: n.whyNow,
+          visionId: n.visionId ?? g.visionId ?? null,
         }
       : g
   );
@@ -844,25 +859,37 @@ export function dbCompleteOnboarding(
 
 // ─── Project functions ────────────────────────────────────────────────────────
 
-export function dbGetProjects(goalId: string): Project[] {
+export function dbGetProjects(goalId: string | null): Project[] {
   return load<Project>(KEY_PROJECTS)
-    .filter((p) => p.goalId === goalId)
+    .filter((p) => (p.goalId ?? null) === goalId)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
-export function dbCreateProject(goalId: string, name: string, color: string): Project {
+export function dbGetOrphanProjects(): Project[] {
+  return load<Project>(KEY_PROJECTS)
+    .filter((p) => !p.goalId)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+export function dbCreateProject(goalId: string | null, name: string, color: string): Project {
   const projects = load<Project>(KEY_PROJECTS);
-  const goalProjects = projects.filter((p) => p.goalId === goalId);
+  const sameScope = projects.filter((p) => (p.goalId ?? null) === (goalId ?? null));
   const project: Project = {
     id: generateId(),
-    goalId,
+    goalId: goalId ?? null,
     name: name.trim(),
     color,
-    sortOrder: goalProjects.length,
+    sortOrder: sameScope.length,
     createdAt: Date.now(),
   };
   save(KEY_PROJECTS, [...projects, project]);
   return project;
+}
+
+export function dbSetProjectGoal(id: string, goalId: string | null): boolean {
+  const projects = load<Project>(KEY_PROJECTS);
+  save(KEY_PROJECTS, projects.map((p) => (p.id === id ? { ...p, goalId: goalId ?? null } : p)));
+  return true;
 }
 
 export function dbUpdateProject(id: string, name: string, color: string): boolean {
@@ -1038,4 +1065,314 @@ function webRefreshResumeContext(): ResumeContext | null {
 
   ctxRemove(RESUME_CONTEXT_KEY);
   return null;
+}
+
+// ─── Visions ──────────────────────────────────────────────────────────────────
+
+export function dbGetVisions(): Vision[] {
+  return load<Vision>(KEY_VISIONS)
+    .filter((v) => v.status !== 'archived')
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
+}
+
+export function dbGetVisionById(id: string): Vision | null {
+  return load<Vision>(KEY_VISIONS).find((v) => v.id === id) ?? null;
+}
+
+export function dbCreateVision(input: VisionWriteInput): Vision {
+  const visions = load<Vision>(KEY_VISIONS);
+  const vision: Vision = {
+    id: generateId(),
+    title: cleanText(input.title),
+    description: cleanText(input.description),
+    identityStatement: cleanText(input.identityStatement),
+    color: input.color || '#3B5BDB',
+    sortOrder: visions.length,
+    status: 'active',
+    createdAt: Date.now(),
+  };
+  save(KEY_VISIONS, [...visions, vision]);
+  return vision;
+}
+
+export function dbUpdateVision(id: string, input: VisionWriteInput): boolean {
+  const visions = load<Vision>(KEY_VISIONS);
+  save(
+    KEY_VISIONS,
+    visions.map((v) =>
+      v.id === id
+        ? {
+            ...v,
+            title: cleanText(input.title) || v.title,
+            description: cleanText(input.description),
+            identityStatement: cleanText(input.identityStatement),
+            color: input.color || v.color,
+          }
+        : v
+    )
+  );
+  return true;
+}
+
+export function dbArchiveVision(id: string): boolean {
+  const visions = load<Vision>(KEY_VISIONS);
+  save(KEY_VISIONS, visions.map((v) => (v.id === id ? { ...v, status: 'archived' as const } : v)));
+  // Unlink goals/habits
+  const goals = getGoalsStore();
+  save(KEY_GOALS, goals.map((g) => (g.visionId === id ? { ...g, visionId: null } : g)));
+  const habits = load<Habit>(KEY_HABITS);
+  save(KEY_HABITS, habits.map((h) => (h.visionId === id ? { ...h, visionId: null } : h)));
+  return true;
+}
+
+// ─── Habits ───────────────────────────────────────────────────────────────────
+
+function normalizeHabit(h: Habit | (Partial<Habit> & { id: string; title: string; startedAt: number })): Habit {
+  return {
+    id: h.id,
+    title: cleanText(h.title),
+    cue: cleanText((h as Habit).cue),
+    cueType: ((h as Habit).cueType as Habit['cueType']) || 'time',
+    stackAnchorHabitId: (h as Habit).stackAnchorHabitId ?? null,
+    identityStatement: cleanText((h as Habit).identityStatement),
+    cadenceType: ((h as Habit).cadenceType as Habit['cadenceType']) || 'daily',
+    cadenceTarget: (h as Habit).cadenceTarget ?? 7,
+    cadenceDays: Array.isArray((h as Habit).cadenceDays) ? (h as Habit).cadenceDays! : [],
+    goalId: (h as Habit).goalId ?? null,
+    visionId: (h as Habit).visionId ?? null,
+    status: ((h as Habit).status as Habit['status']) || 'learning',
+    startedAt: h.startedAt ?? Date.now(),
+    graduatedAt: (h as Habit).graduatedAt ?? null,
+    sortOrder: (h as Habit).sortOrder ?? 0,
+  };
+}
+
+export function dbGetHabits(options?: { includeGraduated?: boolean; goalId?: string | null }): Habit[] {
+  const includeGrad = options?.includeGraduated ?? false;
+  return load<Habit>(KEY_HABITS)
+    .map(normalizeHabit)
+    .filter((h) => (includeGrad ? true : h.status !== 'graduated'))
+    .filter((h) => (options?.goalId === undefined ? true : (h.goalId ?? null) === (options.goalId ?? null)))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.startedAt - b.startedAt);
+}
+
+export function dbGetHabitById(id: string): Habit | null {
+  const h = load<Habit>(KEY_HABITS).find((x) => x.id === id);
+  return h ? normalizeHabit(h) : null;
+}
+
+export function dbCreateHabit(input: HabitWriteInput): Habit {
+  const habits = load<Habit>(KEY_HABITS);
+  const habit: Habit = normalizeHabit({
+    id: generateId(),
+    title: cleanText(input.title),
+    cue: cleanText(input.cue),
+    cueType: input.cueType ?? 'time',
+    stackAnchorHabitId: input.stackAnchorHabitId ?? null,
+    identityStatement: cleanText(input.identityStatement),
+    cadenceType: input.cadenceType ?? 'daily',
+    cadenceTarget: input.cadenceTarget ?? 7,
+    cadenceDays: input.cadenceDays ?? [],
+    goalId: input.goalId ?? null,
+    visionId: input.visionId ?? null,
+    status: 'learning',
+    startedAt: Date.now(),
+    graduatedAt: null,
+    sortOrder: habits.length,
+  });
+  save(KEY_HABITS, [...habits, habit]);
+  return habit;
+}
+
+export function dbUpdateHabit(id: string, input: HabitWriteInput): boolean {
+  const habits = load<Habit>(KEY_HABITS);
+  save(
+    KEY_HABITS,
+    habits.map((h) =>
+      h.id === id
+        ? normalizeHabit({
+            ...h,
+            title: cleanText(input.title) || h.title,
+            cue: cleanText(input.cue),
+            cueType: input.cueType ?? h.cueType,
+            stackAnchorHabitId: input.stackAnchorHabitId === undefined ? h.stackAnchorHabitId : input.stackAnchorHabitId,
+            identityStatement: cleanText(input.identityStatement),
+            cadenceType: input.cadenceType ?? h.cadenceType,
+            cadenceTarget: input.cadenceTarget ?? h.cadenceTarget,
+            cadenceDays: input.cadenceDays ?? h.cadenceDays,
+            goalId: input.goalId === undefined ? h.goalId : input.goalId,
+            visionId: input.visionId === undefined ? h.visionId : input.visionId,
+          })
+        : h
+    )
+  );
+  return true;
+}
+
+export function dbSetHabitStatus(id: string, status: Habit['status']): boolean {
+  const habits = load<Habit>(KEY_HABITS);
+  save(
+    KEY_HABITS,
+    habits.map((h) =>
+      h.id === id
+        ? {
+            ...h,
+            status,
+            graduatedAt: status === 'graduated' ? Date.now() : h.graduatedAt ?? null,
+          }
+        : h
+    )
+  );
+  return true;
+}
+
+export function dbDeleteHabit(id: string): boolean {
+  save(
+    KEY_HABITS,
+    load<Habit>(KEY_HABITS).filter((h) => h.id !== id)
+  );
+  save(
+    KEY_HABIT_COMPLETIONS,
+    load<HabitCompletion>(KEY_HABIT_COMPLETIONS).filter((c) => c.habitId !== id)
+  );
+  return true;
+}
+
+export function dbLogHabitCompletion(
+  habitId: string,
+  date: string,
+  status: HabitCompletionStatus
+): HabitCompletion {
+  const completions = load<HabitCompletion>(KEY_HABIT_COMPLETIONS);
+  const existing = completions.find((c) => c.habitId === habitId && c.date === date);
+  if (existing) {
+    const updated: HabitCompletion = { ...existing, status, completedAt: Date.now() };
+    save(KEY_HABIT_COMPLETIONS, completions.map((c) => (c.id === existing.id ? updated : c)));
+    return updated;
+  }
+  const completion: HabitCompletion = {
+    id: generateId(),
+    habitId,
+    date,
+    status,
+    completedAt: Date.now(),
+  };
+  save(KEY_HABIT_COMPLETIONS, [...completions, completion]);
+  return completion;
+}
+
+export function dbClearHabitCompletion(habitId: string, date: string): boolean {
+  const completions = load<HabitCompletion>(KEY_HABIT_COMPLETIONS);
+  save(
+    KEY_HABIT_COMPLETIONS,
+    completions.filter((c) => !(c.habitId === habitId && c.date === date))
+  );
+  return true;
+}
+
+export function dbGetHabitCompletions(habitId: string): HabitCompletion[] {
+  return load<HabitCompletion>(KEY_HABIT_COMPLETIONS)
+    .filter((c) => c.habitId === habitId)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// ─── Habit cadence + streak logic ─────────────────────────────────────────────
+
+function shiftDate(ymd: string, deltaDays: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + deltaDays);
+  return formatDate(dt);
+}
+
+function dayOfWeek(ymd: string): number {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay(); // 0=Sun..6=Sat
+}
+
+export function isHabitScheduledOn(habit: Habit, ymd: string): boolean {
+  const dow = dayOfWeek(ymd);
+  switch (habit.cadenceType) {
+    case 'daily':
+      return true;
+    case 'weekdays':
+      return dow >= 1 && dow <= 5;
+    case 'custom_days':
+      return habit.cadenceDays.includes(dow);
+    case 'n_per_week':
+      // n_per_week is adherence-target based, not day-scheduled; treat all days as schedulable
+      return true;
+    default:
+      return true;
+  }
+}
+
+// ADHD-aware streak: count consecutive scheduled days done, up to today.
+// One-miss forgiveness: a single missed day bracketed by done days doesn't reset.
+export function computeHabitStreak(habit: Habit, completions: HabitCompletion[], today: string): number {
+  const byDate = new Map(completions.map((c) => [c.date, c.status] as const));
+  let streak = 0;
+  let forgiveness = 1; // one miss allowed
+  let cursor = today;
+  // walk backwards up to a safety bound
+  for (let i = 0; i < 365; i++) {
+    if (!isHabitScheduledOn(habit, cursor)) {
+      cursor = shiftDate(cursor, -1);
+      continue;
+    }
+    const status = byDate.get(cursor);
+    if (status === 'done') {
+      streak += 1;
+    } else if (status === 'skipped') {
+      // intentional skip — neutral, neither extends nor breaks
+    } else {
+      // missed or unlogged
+      if (cursor === today) {
+        // today unlogged — don't break the streak yet
+      } else if (forgiveness > 0) {
+        forgiveness -= 1;
+      } else {
+        break;
+      }
+    }
+    cursor = shiftDate(cursor, -1);
+  }
+  return streak;
+}
+
+export function dbGetTodayHabits(today: string = todayString()): HabitTodayView[] {
+  const habits = dbGetHabits();
+  const allCompletions = load<HabitCompletion>(KEY_HABIT_COMPLETIONS);
+  return habits.map((habit) => {
+    const completions = allCompletions.filter((c) => c.habitId === habit.id);
+    const todayStatus = completions.find((c) => c.date === today)?.status ?? null;
+    const streak = computeHabitStreak(habit, completions, today);
+    const scheduledToday = isHabitScheduledOn(habit, today);
+
+    const recentDots: Array<'done' | 'miss' | 'skip' | 'off'> = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = shiftDate(today, -i);
+      if (!isHabitScheduledOn(habit, d)) {
+        recentDots.push('off');
+        continue;
+      }
+      const s = completions.find((c) => c.date === d)?.status;
+      if (s === 'done') recentDots.push('done');
+      else if (s === 'skipped') recentDots.push('skip');
+      else recentDots.push('miss');
+    }
+
+    // 30-day adherence over scheduled days only
+    let scheduled = 0;
+    let done = 0;
+    for (let i = 0; i < 30; i++) {
+      const d = shiftDate(today, -i);
+      if (!isHabitScheduledOn(habit, d)) continue;
+      scheduled += 1;
+      if (completions.find((c) => c.date === d)?.status === 'done') done += 1;
+    }
+    const adherencePct = scheduled > 0 ? done / scheduled : 0;
+
+    return { habit, todayStatus, streak, recentDots, scheduledToday, adherencePct };
+  });
 }
