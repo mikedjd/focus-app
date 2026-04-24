@@ -1415,7 +1415,6 @@ function TodayPage() {
     (task) => task.goalId === STANDALONE_TASKS_GOAL_ID || task.taskType !== 'goal'
   );
   const firstPending = mainTasks.find((task) => task.status === 'pending') ?? null;
-  const canAddTask = tasks.length < DAILY_CAP;
   const groupedTasks = mainTasks.reduce<Record<string, DailyTask[]>>((groups, task) => {
     const key = task.projectId ?? 'none';
     groups[key] = groups[key] ?? [];
@@ -1457,7 +1456,6 @@ function TodayPage() {
           <button
             className="primary-button"
             type="button"
-            disabled={!canAddTask}
             onClick={() => setSecondaryAddOpen(true)}
           >
             Add task
@@ -1604,7 +1602,7 @@ function TodayPage() {
           </div>
           <div className="inline-actions">
             <span className="metric-chip">{secondaryTasks.filter((task) => task.status === 'done').length}/{secondaryTasks.length}</span>
-            <button className="primary-button" type="button" disabled={!canAddTask} onClick={() => setSecondaryAddOpen(true)}>
+            <button className="primary-button" type="button" onClick={() => setSecondaryAddOpen(true)}>
               {secondaryTasks.length === 0 ? 'Add your first task' : 'Add task'}
             </button>
           </div>

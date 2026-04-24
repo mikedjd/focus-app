@@ -398,6 +398,10 @@ function getActiveTasks(tasks: DailyTask[], date: string): DailyTask[] {
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+function getActiveGoalTasks(tasks: DailyTask[], date: string): DailyTask[] {
+  return getActiveTasks(tasks, date).filter((task) => (task.taskType ?? 'goal') === 'goal');
+}
+
 function normalizeTask(task: DailyTask): DailyTask {
   const defaults = getDailyRhythmSettings();
   const taskType = task.taskType ?? 'goal';
@@ -459,11 +463,11 @@ export function dbCreateTask(
   const resolvedGoalId = goalId || STANDALONE_TASKS_GOAL_ID;
   const targetDate = options?.date ?? todayString();
   const isToday = targetDate === todayString();
-  if (isToday && getActiveTasks(tasks, targetDate).length >= DAILY_TASK_CAP) {
-    return { ok: false, reason: 'task_limit_reached' };
-  }
   const defaults = getDailyRhythmSettings();
   const taskType = options?.taskType ?? 'goal';
+  if (isToday && taskType === 'goal' && getActiveGoalTasks(tasks, targetDate).length >= DAILY_TASK_CAP) {
+    return { ok: false, reason: 'task_limit_reached' };
+  }
   const effortLevel = options?.effortLevel ?? '';
   // Auto-slot admin tasks into the matching energy window when none is specified
   const scheduledWindowStart =
