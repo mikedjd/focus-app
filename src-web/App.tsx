@@ -2300,6 +2300,7 @@ function ReviewPage() {
   const [whatBroke, setWhatBroke] = useState('');
   const [adjustment, setAdjustment] = useState('');
   const [nextFocus, setNextFocus] = useState('');
+  const [emailTaskDraft, setEmailTaskDraft] = useState('');
 
   useEffect(() => {
     setDailyWins(dailyReview?.wins ?? '');
@@ -2319,6 +2320,25 @@ function ReviewPage() {
   const focusSeconds = focusSessions.reduce((sum, session) => sum + session.durationSeconds, 0);
   const completedFocusSessions = focusSessions.filter((session) => session.status === 'completed').length;
   const abandonedFocusSessions = focusSessions.filter((session) => session.status === 'abandoned').length;
+  const createEmailTask = () => {
+    const trimmed = emailTaskDraft.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const result = mutate(() =>
+      db.dbCreateTask(trimmed, '', null, {
+        taskType: 'admin',
+      })
+    );
+
+    if (!result.ok) {
+      window.alert("Today's task lane is full.");
+      return;
+    }
+
+    setEmailTaskDraft('');
+  };
 
   return (
     <>
@@ -2357,6 +2377,32 @@ function ReviewPage() {
             <span>First concrete step tomorrow</span>
             <input value={dailyTomorrow} onChange={(event) => setDailyTomorrow(event.target.value)} />
           </label>
+
+          <div className="preview-card">
+            <p className="eyebrow">Email closeout</p>
+            <div className="shutdown-checklist">
+              <span>Go through emails</span>
+              <span>Clear inbox</span>
+              <span>Allocate tasks from emails</span>
+            </div>
+            <form
+              className="inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                createEmailTask();
+              }}
+            >
+              <input
+                value={emailTaskDraft}
+                onChange={(event) => setEmailTaskDraft(event.target.value)}
+                placeholder="Task from an email"
+              />
+              <button className="secondary-button" type="submit" disabled={!emailTaskDraft.trim()}>
+                Add task
+              </button>
+            </form>
+          </div>
+
           <button className="primary-button" type="submit" disabled={!dailyWins.trim()}>
             Save shutdown
           </button>
