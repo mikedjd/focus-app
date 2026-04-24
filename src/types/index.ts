@@ -292,6 +292,7 @@ export interface OnboardingDraft {
   anchorWhy: string;
   anchorDrift: string;
   weeklyFocus: string;
+  draftSteps: string[];
 }
 
 export interface BrainDumpItem {

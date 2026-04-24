@@ -20,6 +20,7 @@ import type {
   HabitCompletionStatus,
   HabitTodayView,
   HabitWriteInput,
+  Milestone,
   Project,
   ResumeContext,
   TaskWriteResult,
@@ -57,6 +58,7 @@ const KEY_PROJECTS = 'adhd_projects';
 const KEY_VISIONS = 'adhd_visions';
 const KEY_HABITS = 'adhd_habits';
 const KEY_HABIT_COMPLETIONS = 'adhd_habit_completions';
+const KEY_MILESTONES = 'adhd_milestones';
 const KEY_BRAIN_DUMP = 'adhd_brain_dump';
 const KEY_FOCUS_SESSIONS = 'adhd_focus_sessions';
 const KEY_CTX_PREFIX = 'adhd_ctx_';
@@ -863,6 +865,7 @@ export function dbCompleteOnboarding(
   }, { status: 'active' });
   if (!goal) return { goal: null, weeklyFocusId: null };
   if (draft.weeklyFocus.trim()) dbUpsertWeeklyFocus(goal.id, draft.weeklyFocus.trim());
+  if (draft.draftSteps?.length) dbSetMilestonesForGoal(goal.id, draft.draftSteps);
   ctxSet(ONBOARDING_COMPLETE_KEY, '1');
   ctxRemove(ONBOARDING_DRAFT_KEY);
   return { goal, weeklyFocusId: dbGetCurrentWeeklyFocus(goal.id)?.id ?? null };
@@ -1386,4 +1389,61 @@ export function dbGetTodayHabits(today: string = todayString()): HabitTodayView[
 
     return { habit, todayStatus, streak, recentDots, scheduledToday, adherencePct };
   });
+}
+
+// ─── Milestones ──────────────────────────────────────────────────────────────
+
+export function dbGetMilestones(goalId: string): Milestone[] {
+  return load<Milestone>(KEY_MILESTONES)
+    .filter((m) => m.goalId === goalId)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+export function dbCreateMilestone(goalId: string, title: string): Milestone | null {
+  const trimmed = title.trim();
+  if (!trimmed) return null;
+  const all = load<Milestone>(KEY_MILESTONES);
+  const existing = all.filter((m) => m.goalId === goalId);
+  const sortOrder = existing.length > 0 ? Math.max(...existing.map((m) => m.sortOrder)) + 1 : 0;
+  const milestone: Milestone = {
+    id: generateId(),
+    goalId,
+    title: trimmed,
+    targetMetric: '',
+    sortOrder,
+    completedAt: null,
+    createdAt: Date.now(),
+  };
+  save(KEY_MILESTONES, [...all, milestone]);
+  return milestone;
+}
+
+export function dbToggleMilestone(id: string): void {
+  const all = load<Milestone>(KEY_MILESTONES);
+  save(
+    KEY_MILESTONES,
+    all.map((m) => (m.id === id ? { ...m, completedAt: m.completedAt ? null : Date.now() } : m))
+  );
+}
+
+export function dbDeleteMilestone(id: string): void {
+  save(KEY_MILESTONES, load<Milestone>(KEY_MILESTONES).filter((m) => m.id !== id));
+}
+
+export function dbSetMilestonesForGoal(goalId: string, titles: string[]): void {
+  const others = load<Milestone>(KEY_MILESTONES).filter((m) => m.goalId !== goalId);
+  const now = Date.now();
+  const fresh: Milestone[] = titles
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((title, i) => ({
+      id: generateId(),
+      goalId,
+      title,
+      targetMetric: '',
+      sortOrder: i,
+      completedAt: null,
+      createdAt: now,
+    }));
+  save(KEY_MILESTONES, [...others, ...fresh]);
 }

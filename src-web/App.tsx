@@ -24,6 +24,7 @@ import type {
   HabitCueType,
   HabitTodayView,
   HabitWriteInput,
+  Milestone,
   OnboardingDraft,
   Project,
   ResumeContext,
@@ -76,6 +77,7 @@ const EMPTY_ONBOARDING_DRAFT: OnboardingDraft = {
   anchorWhy: '',
   anchorDrift: '',
   weeklyFocus: '',
+  draftSteps: ['', '', ''],
 };
 
 const EXIT_REASONS: Array<{ id: Exclude<FocusExitReason, 'switched_task'>; label: string }> = [
@@ -185,6 +187,7 @@ function createGoalDraft(goal?: Goal | null): Omit<OnboardingDraft, 'weeklyFocus
     costOfDrift: goal?.costOfDrift ?? '',
     anchorWhy: goal?.anchorWhy ?? '',
     anchorDrift: goal?.anchorDrift ?? '',
+    draftSteps: ['', '', ''],
   };
 }
 
@@ -295,195 +298,247 @@ function Modal({
   );
 }
 
-function GoalFields({
+// ─── Goal wizard (4 steps) ────────────────────────────────────────────────────
+
+const WIZARD_STEPS = [
+  { label: 'Name it' },
+  { label: 'Define success' },
+  { label: 'Why it matters' },
+  { label: 'First steps' },
+] as const;
+
+function WizardProgress({ step, total }: { step: number; total: number }) {
+  return (
+    <div className="wizard-progress">
+      {Array.from({ length: total }).map((_, i) => (
+        <div key={i} className={`wizard-dot ${i + 1 === step ? 'is-active' : i + 1 < step ? 'is-done' : ''}`} />
+      ))}
+      <span className="wizard-step-label">{WIZARD_STEPS[step - 1].label}</span>
+    </div>
+  );
+}
+
+function GoalWizard({
   draft,
   setDraft,
+  status,
+  setStatus,
   showWeeklyFocus = false,
+  showPlacement = false,
+  isEditing = false,
+  onCancel,
+  onSubmit,
 }: {
   draft: OnboardingDraft;
   setDraft: (next: OnboardingDraft) => void;
+  status: Exclude<GoalStatus, 'completed'>;
+  setStatus: (s: Exclude<GoalStatus, 'completed'>) => void;
   showWeeklyFocus?: boolean;
+  showPlacement?: boolean;
+  isEditing?: boolean;
+  onCancel: () => void;
+  onSubmit: () => void;
 }) {
-  const autoAnchors = generateAnchorLines({
-    practicalReason: draft.practicalReason,
-    emotionalReason: draft.emotionalReason,
-    costOfDrift: draft.costOfDrift,
-  });
+  const [step, setStep] = useState(1);
+  const TOTAL = 4;
+
+  // Reset to step 1 whenever the wizard is re-mounted for a new goal
+  useEffect(() => {
+    setStep(1);
+  }, [isEditing]);
+
+  const setStepVal = (idx: number, val: string) => {
+    const next = [...draft.draftSteps];
+    next[idx] = val;
+    setDraft({ ...draft, draftSteps: next });
+  };
+
+  const canProceed1 = draft.goalTitle.trim().length > 0;
+  const canProceed2 = draft.targetOutcome.trim().length > 0;
+  const canFinish = canProceed1 && canProceed2;
 
   return (
-    <div className="form-grid">
-      <label className="field">
-        <span>Goal title</span>
-        <input
-          value={draft.goalTitle}
-          onChange={(event) => setDraft({ ...draft, goalTitle: event.target.value })}
-          placeholder="What are you moving?"
-        />
-      </label>
+    <div className="wizard-shell">
+      <WizardProgress step={step} total={TOTAL} />
 
-      <label className="field">
-        <span>Target outcome</span>
-        <input
-          value={draft.targetOutcome}
-          onChange={(event) => setDraft({ ...draft, targetOutcome: event.target.value })}
-          placeholder="What does success look like?"
-        />
-      </label>
+      {step === 1 && (
+        <div className="wizard-step">
+          <p className="wizard-question">What do you want to achieve?</p>
+          <p className="wizard-hint">Be concrete — "Launch my portfolio" beats "be more productive".</p>
+          <label className="field">
+            <span>Goal title</span>
+            <input
+              autoFocus
+              value={draft.goalTitle}
+              onChange={(e) => setDraft({ ...draft, goalTitle: e.target.value })}
+              placeholder="e.g. Ship my freelance portfolio site"
+              onKeyDown={(e) => { if (e.key === 'Enter' && canProceed1) { e.preventDefault(); setStep(2); } }}
+            />
+          </label>
+        </div>
+      )}
 
-      <label className="field">
-        <span>Metric</span>
-        <input
-          value={draft.metric}
-          onChange={(event) => setDraft({ ...draft, metric: event.target.value })}
-          placeholder="Optional measure"
-        />
-      </label>
+      {step === 2 && (
+        <div className="wizard-step">
+          <p className="wizard-question">What does winning look like?</p>
+          <p className="wizard-hint">Describe the end state clearly — future-you should be able to tick it off without debate.</p>
+          <label className="field">
+            <span>Target outcome</span>
+            <textarea
+              autoFocus
+              rows={3}
+              value={draft.targetOutcome}
+              onChange={(e) => setDraft({ ...draft, targetOutcome: e.target.value })}
+              placeholder="e.g. A live site with 3 case studies, contact form working, and shared with 10 people"
+            />
+          </label>
+          <label className="field">
+            <span>How will you measure it? <em className="optional-label">(optional)</em></span>
+            <input
+              value={draft.metric}
+              onChange={(e) => setDraft({ ...draft, metric: e.target.value })}
+              placeholder="e.g. 10 people have visited the site"
+            />
+          </label>
+          <label className="toggle-field">
+            <input
+              type="checkbox"
+              checked={draft.hasTargetDate}
+              onChange={(e) => setDraft({ ...draft, hasTargetDate: e.target.checked, targetDate: e.target.checked ? draft.targetDate : '' })}
+            />
+            <span>Set a target date</span>
+          </label>
+          {draft.hasTargetDate && (
+            <label className="field">
+              <span>Target date</span>
+              <input type="date" value={draft.targetDate} onChange={(e) => setDraft({ ...draft, targetDate: e.target.value })} />
+            </label>
+          )}
+        </div>
+      )}
 
-      <label className="field">
-        <span>Importance</span>
-        <select
-          value={draft.importance}
-          onChange={(event) => setDraft({ ...draft, importance: Number(event.target.value) })}
-        >
-          {GOAL_RATING_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      {step === 3 && (
+        <div className="wizard-step">
+          <p className="wizard-question">Why does this matter to you?</p>
+          <p className="wizard-hint">Honest answers here become your anchors on hard days — they pull you back when motivation dips.</p>
+          <label className="field">
+            <span>Why now, not later?</span>
+            <textarea
+              autoFocus
+              rows={2}
+              value={draft.whyNow}
+              onChange={(e) => setDraft({ ...draft, whyNow: e.target.value })}
+              placeholder="e.g. I have a job interview in 6 weeks and I need proof of work"
+            />
+          </label>
+          <label className="field">
+            <span>What's the practical benefit?</span>
+            <textarea
+              rows={2}
+              value={draft.practicalReason}
+              onChange={(e) => setDraft({ ...draft, practicalReason: e.target.value })}
+              placeholder="e.g. It unlocks freelance income and removes financial stress"
+            />
+          </label>
+          <label className="field">
+            <span>How will achieving this make you feel?</span>
+            <textarea
+              rows={2}
+              value={draft.emotionalReason}
+              onChange={(e) => setDraft({ ...draft, emotionalReason: e.target.value })}
+              placeholder="e.g. Proud and confident — I'll finally have evidence I can point to"
+            />
+          </label>
+          <label className="field">
+            <span>What's the cost of letting this drift?</span>
+            <textarea
+              rows={2}
+              value={draft.costOfDrift}
+              onChange={(e) => setDraft({ ...draft, costOfDrift: e.target.value })}
+              placeholder="e.g. Another year of second-guessing myself and turning down opportunities"
+            />
+          </label>
+          <div className="wizard-ratings">
+            <label className="field">
+              <span>Importance</span>
+              <select value={draft.importance} onChange={(e) => setDraft({ ...draft, importance: Number(e.target.value) })}>
+                {GOAL_RATING_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="field">
+              <span>Urgency</span>
+              <select value={draft.urgency} onChange={(e) => setDraft({ ...draft, urgency: Number(e.target.value) })}>
+                {GOAL_RATING_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="field">
+              <span>Payoff</span>
+              <select value={draft.payoff} onChange={(e) => setDraft({ ...draft, payoff: Number(e.target.value) })}>
+                {GOAL_RATING_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+          </div>
+        </div>
+      )}
 
-      <label className="field">
-        <span>Urgency</span>
-        <select
-          value={draft.urgency}
-          onChange={(event) => setDraft({ ...draft, urgency: Number(event.target.value) })}
-        >
-          {GOAL_RATING_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      {step === 4 && (
+        <div className="wizard-step">
+          <p className="wizard-question">What are your first concrete steps?</p>
+          <p className="wizard-hint">Each step should be small enough to finish in one focus session. These become your milestones.</p>
+          <div className="wizard-steps-list">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <label key={i} className="field wizard-step-input">
+                <span>Step {i + 1}{i >= 3 ? <em className="optional-label"> (optional)</em> : ''}</span>
+                <input
+                  autoFocus={i === 0}
+                  value={draft.draftSteps[i] ?? ''}
+                  onChange={(e) => setStepVal(i, e.target.value)}
+                  placeholder={i === 0 ? 'e.g. Sketch the site structure on paper' : i === 1 ? 'e.g. Set up the repo and pick a template' : ''}
+                />
+              </label>
+            ))}
+          </div>
+          {showWeeklyFocus && (
+            <label className="field">
+              <span>This week&apos;s focus</span>
+              <textarea
+                rows={2}
+                value={draft.weeklyFocus}
+                onChange={(e) => setDraft({ ...draft, weeklyFocus: e.target.value })}
+                placeholder="What is the one move for this week?"
+              />
+            </label>
+          )}
+          {showPlacement && (
+            <label className="field">
+              <span>Place this goal</span>
+              <select value={status} onChange={(e) => setStatus(e.target.value as Exclude<GoalStatus, 'completed'>)}>
+                {GOAL_PLACEMENT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+      )}
 
-      <label className="field">
-        <span>Payoff</span>
-        <select
-          value={draft.payoff}
-          onChange={(event) => setDraft({ ...draft, payoff: Number(event.target.value) })}
-        >
-          {GOAL_RATING_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="toggle-field">
-        <input
-          checked={draft.hasTargetDate}
-          onChange={(event) =>
-            setDraft({
-              ...draft,
-              hasTargetDate: event.target.checked,
-              targetDate: event.target.checked ? draft.targetDate : '',
-            })
-          }
-          type="checkbox"
-        />
-        <span>Use a target date</span>
-      </label>
-
-      {draft.hasTargetDate ? (
-        <label className="field">
-          <span>Target date</span>
-          <input
-            type="date"
-            value={draft.targetDate}
-            onChange={(event) => setDraft({ ...draft, targetDate: event.target.value })}
-          />
-        </label>
-      ) : null}
-
-      <label className="field field-wide">
-        <span>Why this matters now</span>
-        <textarea
-          value={draft.whyNow}
-          onChange={(event) => setDraft({ ...draft, whyNow: event.target.value })}
-          placeholder="Why should this goal compete for the active slot right now?"
-          rows={2}
-        />
-      </label>
-
-      <label className="field field-wide">
-        <span>Practical reason</span>
-        <textarea
-          value={draft.practicalReason}
-          onChange={(event) => setDraft({ ...draft, practicalReason: event.target.value })}
-          placeholder="Why is this useful in real life?"
-          rows={3}
-        />
-      </label>
-
-      <label className="field field-wide">
-        <span>Emotional reason</span>
-        <textarea
-          value={draft.emotionalReason}
-          onChange={(event) => setDraft({ ...draft, emotionalReason: event.target.value })}
-          placeholder="Why does it matter to you personally?"
-          rows={3}
-        />
-      </label>
-
-      <label className="field field-wide">
-        <span>Cost of drift</span>
-        <textarea
-          value={draft.costOfDrift}
-          onChange={(event) => setDraft({ ...draft, costOfDrift: event.target.value })}
-          placeholder="What gets worse if this keeps slipping?"
-          rows={3}
-        />
-      </label>
-
-      <div className="preview-card field-wide">
-        <p className="eyebrow">Anchor preview</p>
-        <p>{autoAnchors.anchorWhy || 'Your why anchor will appear here.'}</p>
-        <p>{autoAnchors.anchorDrift || 'Your drift anchor will appear here.'}</p>
+      <div className="wizard-nav">
+        <button className="ghost-button" type="button" onClick={step === 1 ? onCancel : () => setStep(step - 1)}>
+          {step === 1 ? 'Cancel' : '← Back'}
+        </button>
+        {step < TOTAL ? (
+          <button
+            className="primary-button"
+            type="button"
+            disabled={step === 1 ? !canProceed1 : step === 2 ? !canProceed2 : false}
+            onClick={() => setStep(step + 1)}
+          >
+            Next →
+          </button>
+        ) : (
+          <button className="primary-button" type="button" disabled={!canFinish} onClick={onSubmit}>
+            {isEditing ? 'Save changes' : 'Create goal'}
+          </button>
+        )}
       </div>
-
-      <label className="field field-wide">
-        <span>Editable why anchor</span>
-        <textarea
-          value={draft.anchorWhy}
-          onChange={(event) => setDraft({ ...draft, anchorWhy: event.target.value })}
-          placeholder={autoAnchors.anchorWhy || 'Leave blank to use the auto preview'}
-          rows={3}
-        />
-      </label>
-
-      <label className="field field-wide">
-        <span>Editable drift anchor</span>
-        <textarea
-          value={draft.anchorDrift}
-          onChange={(event) => setDraft({ ...draft, anchorDrift: event.target.value })}
-          placeholder={autoAnchors.anchorDrift || 'Leave blank to use the auto preview'}
-          rows={3}
-        />
-      </label>
-
-      {showWeeklyFocus ? (
-        <label className="field field-wide">
-          <span>This week&apos;s focus</span>
-          <textarea
-            value={draft.weeklyFocus}
-            onChange={(event) => setDraft({ ...draft, weeklyFocus: event.target.value })}
-            placeholder="What is the one move for this week?"
-            rows={2}
-          />
-        </label>
-      ) : null}
     </div>
   );
 }
@@ -501,7 +556,7 @@ function GoalModal({
   initialGoal?: Goal | null;
   onClose: () => void;
   defaultStatus?: Exclude<GoalStatus, 'completed'>;
-  onSubmit: (input: GoalWriteInput, status: Exclude<GoalStatus, 'completed'>) => void;
+  onSubmit: (input: GoalWriteInput, status: Exclude<GoalStatus, 'completed'>, steps: string[]) => void;
 }) {
   const [draft, setDraft] = useState<OnboardingDraft>({
     ...EMPTY_ONBOARDING_DRAFT,
@@ -512,53 +567,26 @@ function GoalModal({
   );
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    setDraft({
-      ...EMPTY_ONBOARDING_DRAFT,
-      ...createGoalDraft(initialGoal),
-    });
+    if (!open) return;
+    setDraft({ ...EMPTY_ONBOARDING_DRAFT, ...createGoalDraft(initialGoal) });
     setStatus(initialGoal?.status === 'completed' ? defaultStatus : initialGoal?.status ?? defaultStatus);
   }, [defaultStatus, initialGoal, open]);
 
-  const canSubmit = draft.goalTitle.trim().length > 0 && draft.targetOutcome.trim().length > 0;
-
   return (
     <Modal open={open} title={title} onClose={onClose}>
-      <form
-        className="stack"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!canSubmit) {
-            return;
-          }
-
-          onSubmit(toGoalWriteInput(draft), status);
+      <GoalWizard
+        draft={draft}
+        setDraft={setDraft}
+        status={status}
+        setStatus={setStatus}
+        showPlacement
+        isEditing={!!initialGoal}
+        onCancel={onClose}
+        onSubmit={() => {
+          onSubmit(toGoalWriteInput(draft), status, draft.draftSteps);
           onClose();
         }}
-      >
-        <GoalFields draft={draft} setDraft={setDraft} />
-        <label className="field">
-          <span>Place this goal</span>
-          <select value={status} onChange={(event) => setStatus(event.target.value as Exclude<GoalStatus, 'completed'>)}>
-            {GOAL_PLACEMENT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="form-actions">
-          <button className="secondary-button" type="button" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="primary-button" type="submit" disabled={!canSubmit}>
-            Save goal
-          </button>
-        </div>
-      </form>
+      />
     </Modal>
   );
 }
@@ -1969,6 +1997,7 @@ type GoalTreeNode = {
   goal: Goal;
   projects: GoalTreeProject[];
   looseTasks: DailyTask[];
+  milestones: Milestone[];
   taskCount: number;
   doneCount: number;
 };
@@ -1981,6 +2010,7 @@ function GoalTree({
   onEditGoal,
   onSetGoalStatus,
   onCompleteGoal,
+  onToggleMilestone,
 }: {
   nodes: GoalTreeNode[];
   selectedGoalId: string | null;
@@ -1989,6 +2019,7 @@ function GoalTree({
   onEditGoal: (goal: Goal) => void;
   onSetGoalStatus: (goalId: string, status: Exclude<GoalStatus, 'completed'>) => void;
   onCompleteGoal: (goalId: string) => void;
+  onToggleMilestone: (id: string) => void;
 }) {
   const selectedNode = nodes.find((node) => node.goal.id === selectedGoalId) ?? null;
 
@@ -2007,6 +2038,9 @@ function GoalTree({
               <strong>{node.goal.title}</strong>
               <span>{node.goal.targetOutcome}</span>
               <span className="goal-tree-meta">
+                {node.milestones.length > 0
+                  ? `${node.milestones.filter((m) => m.completedAt).length}/${node.milestones.length} steps · `
+                  : ''}
                 {node.projects.length} projects / {node.doneCount}/{node.taskCount} tasks
               </span>
             </button>
@@ -2016,7 +2050,7 @@ function GoalTree({
     );
   }
 
-  const { goal, projects, looseTasks, taskCount, doneCount } = selectedNode;
+  const { goal, projects, looseTasks, milestones, taskCount, doneCount } = selectedNode;
   const progressLabel = taskCount === 0 ? 'No tasks yet' : `${doneCount}/${taskCount} tasks done`;
 
   return (
@@ -2062,6 +2096,29 @@ function GoalTree({
             <span className="chip">{progressLabel}</span>
             {goal.metric ? <span className="chip">{goal.metric}</span> : null}
           </div>
+          {milestones.length > 0 ? (
+            <div className="goal-milestones">
+              <div className="milestone-header">
+                <p className="eyebrow">First steps</p>
+                <span className="metric-chip">{milestones.filter((m) => m.completedAt).length}/{milestones.length}</span>
+              </div>
+              <ul className="milestone-list">
+                {milestones.map((m) => (
+                  <li key={m.id} className={`milestone-item ${m.completedAt ? 'is-done' : ''}`}>
+                    <button
+                      type="button"
+                      className="milestone-check"
+                      onClick={() => onToggleMilestone(m.id)}
+                      aria-label={m.completedAt ? 'Mark incomplete' : 'Mark complete'}
+                    >
+                      {m.completedAt ? '✓' : ''}
+                    </button>
+                    <span className="milestone-title">{m.title}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
 
         <div className="goal-tree-branches">
@@ -2148,6 +2205,7 @@ function GoalsPage() {
         goal,
         projects,
         looseTasks,
+        milestones: db.dbGetMilestones(goal.id),
         taskCount: allTasks.length,
         doneCount: allTasks.filter((task) => task.status === 'done').length,
       };
@@ -2219,6 +2277,7 @@ function GoalsPage() {
               mutate(() => db.dbCompleteGoal(goalId));
             }
           }}
+          onToggleMilestone={(id) => mutate(() => db.dbToggleMilestone(id))}
         />
       )}
 
@@ -2228,14 +2287,17 @@ function GoalsPage() {
         initialGoal={selectedGoal}
         defaultStatus={defaultGoalStatus}
         onClose={() => setGoalModalOpen(false)}
-        onSubmit={(input, status) => {
+        onSubmit={(input, status, steps) => {
           if (selectedGoal) {
             mutate(() => db.dbUpdateGoal(selectedGoal.id, input));
             mutate(() => db.dbSetGoalStatus(selectedGoal.id, status));
             return;
           }
 
-          mutate(() => db.dbCreateGoal(input, { status }));
+          const created = mutate(() => db.dbCreateGoal(input, { status }));
+          if (created && steps.some((s) => s.trim())) {
+            mutate(() => db.dbSetMilestonesForGoal(created.id, steps));
+          }
         }}
       />
     </>
@@ -2450,25 +2512,22 @@ function OnboardingPage() {
   const [draft, setDraft] = useState<OnboardingDraft>(() => ({
     ...EMPTY_ONBOARDING_DRAFT,
     ...(db.dbGetOnboardingDraft() ?? {}),
+    draftSteps: (db.dbGetOnboardingDraft() as OnboardingDraft | null)?.draftSteps ?? ['', '', ''],
   }));
+  const [status] = useState<Exclude<GoalStatus, 'completed'>>('active');
 
   useEffect(() => {
     db.dbSaveOnboardingDraft(draft);
   }, [draft]);
 
-  const canSubmit =
-    draft.goalTitle.trim().length > 0 &&
-    draft.targetOutcome.trim().length > 0 &&
-    draft.weeklyFocus.trim().length > 0;
-
   return (
     <div className="onboarding-shell">
       <section className="hero-card">
         <div>
-          <p className="eyebrow">Simple web build</p>
+          <p className="eyebrow">Welcome</p>
           <h1>Set one goal. Anchor it. Start moving.</h1>
           <p className="hero-copy">
-            This version drops the Expo web layer and runs as a straightforward React app over HTTPS.
+            Answer four quick questions and you'll have a clear goal with your first concrete steps ready to go.
           </p>
           <Link className="secondary-button align-start" to="/backup">
             Restore backup
@@ -2477,23 +2536,19 @@ function OnboardingPage() {
       </section>
 
       <section className="card">
-        <form
-          className="stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!canSubmit) {
-              return;
-            }
-
+        <GoalWizard
+          draft={draft}
+          setDraft={setDraft}
+          status={status}
+          setStatus={() => {}}
+          showWeeklyFocus
+          isEditing={false}
+          onCancel={() => {}}
+          onSubmit={() => {
             mutate(() => db.dbCompleteOnboarding(draft));
             navigate('/today', { replace: true });
           }}
-        >
-          <GoalFields draft={draft} setDraft={setDraft} showWeeklyFocus />
-          <button className="primary-button" type="submit" disabled={!canSubmit}>
-            Finish setup
-          </button>
-        </form>
+        />
       </section>
     </div>
   );
