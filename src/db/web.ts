@@ -6,13 +6,18 @@
 
 import type {
   BrainDumpItem,
+  DailyRequirement,
   DailyReview,
+  DailyXpRow,
+  DifficultyPhase,
   DailyPhaseId,
   DailyRhythmSettings,
   DailyTask,
   FocusExitReason,
   FocusSession,
+  GameStats,
   Goal,
+  GoalPerformanceStatus,
   GoalStatus,
   GoalWriteInput,
   Habit,
@@ -23,12 +28,15 @@ import type {
   Milestone,
   Project,
   ResumeContext,
+  TaskTier,
   TaskWriteResult,
   Vision,
   VisionWriteInput,
   WeeklyFocus,
+  WeeklyInspection,
   WeeklyReview,
 } from '../types';
+import { TIER_XP } from '../types';
 import {
   STANDALONE_TASKS_GOAL_ID,
   STANDALONE_TASKS_GOAL_TITLE,
@@ -61,6 +69,8 @@ const KEY_HABIT_COMPLETIONS = 'adhd_habit_completions';
 const KEY_MILESTONES = 'adhd_milestones';
 const KEY_BRAIN_DUMP = 'adhd_brain_dump';
 const KEY_FOCUS_SESSIONS = 'adhd_focus_sessions';
+const KEY_DAILY_XP = 'adhd_daily_xp';
+const KEY_WEEKLY_INSPECTIONS = 'adhd_weekly_inspections';
 const KEY_CTX_PREFIX = 'adhd_ctx_';
 
 const DAILY_TASK_CAP = 3;
@@ -68,6 +78,7 @@ const RESUME_CONTEXT_KEY = 'resume_context';
 const DISMISSED_RESUME_TASK_ID_KEY = 'dismissed_resume_task_id';
 const FOCUS_RESUME_WINDOW_MS = 36 * 60 * 60 * 1000;
 const GOAL_STATUS_ORDER: GoalStatus[] = ['active', 'queued', 'parked', 'completed'];
+const MS_PER_DAY = 86_400_000;
 
 // ─── Raw localStorage helpers ────────────────────────────────────────────────
 
@@ -161,17 +172,32 @@ function normalizeGoalInput(input: GoalWriteInput) {
     payoff: clampGoalRating(input.payoff, 2),
     whyNow: cleanText(input.whyNow),
     visionId: input.visionId ?? null,
+    description: cleanText(input.description),
+    startDate: cleanText(input.startDate) || null,
+    whyItMatters: cleanText(input.whyItMatters) || anchorWhy,
+    xpTarget: input.xpTarget ?? 0,
   };
 }
 
 function normalizeStoredGoal(goal: Goal | (Partial<Goal> & { id: string; title: string; createdAt: number })): Goal {
   const rawStatus = (goal as { status?: GoalStatus | 'archived' }).status;
   const status = rawStatus === 'archived' ? 'parked' : rawStatus;
+  const title = cleanText(goal.title);
+  const createdAt = goal.createdAt;
+  const updatedAt = (goal as Goal).updatedAt ?? createdAt;
+  const totalXp = (goal as Goal).totalXp ?? (goal as Goal).xpTotal ?? 0;
+  const currentStreak = (goal as Goal).currentStreak ?? (goal as Goal).streakCount ?? 0;
+  const healthScore = (goal as Goal).healthScore ?? (goal as Goal).buildHealth ?? 100;
+  const targetDate = cleanText(goal.targetDate) || (goal as Goal).endDate || null;
+  const xpTarget = (goal as Goal).xpTarget ?? 0;
+  const buildHealth = (goal as Goal).buildHealth ?? healthScore;
+  const lastCompletedDate = (goal as Goal).lastCompletedDate ?? '';
   return {
     id: goal.id,
-    title: cleanText(goal.title),
-    targetOutcome: cleanText(goal.targetOutcome) || cleanText(goal.title),
-    targetDate: cleanText(goal.targetDate) || null,
+    name: (goal as Goal).name ?? title,
+    title,
+    targetOutcome: cleanText(goal.targetOutcome) || title,
+    targetDate,
     metric: cleanText(goal.metric),
     why: cleanText(goal.why) || cleanText(goal.anchorWhy),
     practicalReason: cleanText(goal.practicalReason),
@@ -183,7 +209,8 @@ function normalizeStoredGoal(goal: Goal | (Partial<Goal> & { id: string; title: 
     urgency: clampGoalRating(goal.urgency, 1),
     payoff: clampGoalRating(goal.payoff, 2),
     whyNow: cleanText(goal.whyNow),
-    createdAt: goal.createdAt,
+    createdAt,
+    updatedAt,
     status:
       status === 'active' || status === 'queued' || status === 'parked' || status === 'completed'
         ? status
@@ -192,6 +219,30 @@ function normalizeStoredGoal(goal: Goal | (Partial<Goal> & { id: string; title: 
     weeklySeatedSeconds: (goal as Goal).weeklySeatedSeconds ?? 0,
     weeklySeatedWeekOf: (goal as Goal).weeklySeatedWeekOf ?? '',
     visionId: (goal as Goal).visionId ?? null,
+    totalXp,
+    currentStreak,
+    streakDate: (goal as Goal).streakDate ?? '',
+    healthScore,
+    description: (goal as Goal).description ?? '',
+    startDate: (goal as Goal).startDate ?? null,
+    endDate: targetDate,
+    whyItMatters: (goal as Goal).whyItMatters ?? cleanText(goal.anchorWhy) ?? cleanText(goal.why),
+    xpTotal: totalXp,
+    xpTarget,
+    buildHealth,
+    currentPhase: (goal as Goal).currentPhase ?? calculateBuildPhase(totalXp, xpTarget),
+    difficultyPhase: (goal as Goal).difficultyPhase ?? 1,
+    streakCount: currentStreak,
+    lastCompletedDate,
+    performanceStatus:
+      (goal as Goal).performanceStatus ??
+      calculateGoalStatus({
+        xpTotal: totalXp,
+        xpTarget,
+        buildHealth,
+        lastCompletedDate,
+        createdAt,
+      }),
   };
 }
 
@@ -244,6 +295,7 @@ function ensureStandaloneTaskGoal(goals: Goal[]): Goal[] {
     ...goals,
     {
       id: STANDALONE_TASKS_GOAL_ID,
+      name: STANDALONE_TASKS_GOAL_TITLE,
       title: STANDALONE_TASKS_GOAL_TITLE,
       targetOutcome: STANDALONE_TASKS_GOAL_TITLE,
       targetDate: null,
@@ -259,11 +311,28 @@ function ensureStandaloneTaskGoal(goals: Goal[]): Goal[] {
       payoff: 1,
       whyNow: '',
       createdAt: 0,
+      updatedAt: 0,
       status: 'parked',
       currentFrictionMinutes: 2,
       weeklySeatedSeconds: 0,
       weeklySeatedWeekOf: '',
       visionId: null,
+      totalXp: 0,
+      currentStreak: 0,
+      streakDate: '',
+      healthScore: 100,
+      description: '',
+      startDate: null,
+      endDate: null,
+      whyItMatters: '',
+      xpTotal: 0,
+      xpTarget: 0,
+      buildHealth: 100,
+      currentPhase: 1,
+      difficultyPhase: 1,
+      streakCount: 0,
+      lastCompletedDate: '',
+      performanceStatus: 'on_track',
     },
   ];
 }
@@ -278,6 +347,21 @@ export function dbGetGoals(): Goal[] {
   return sortGoals(getGoalsStore()).filter((goal) => goal.id !== STANDALONE_TASKS_GOAL_ID);
 }
 
+export function dbCreateDefaultGoal(): Goal | null {
+  return dbCreateGoal({
+    title: 'Build momentum',
+    targetOutcome: 'Create a steady weekly goal rhythm',
+    metric: 'XP earned',
+    why: 'A simple default goal keeps tasks anchored until a specific goal is chosen.',
+    practicalReason: 'Keep daily tasks grouped.',
+    emotionalReason: 'Make progress visible.',
+    costOfDrift: 'Tasks drift without an anchor.',
+    description: 'Default goal project',
+    startDate: todayString(),
+    whyItMatters: 'A small visible build is easier to return to.',
+  });
+}
+
 export function dbCreateGoal(
   input: GoalWriteInput,
   options?: { status?: Exclude<GoalStatus, 'completed'> }
@@ -285,8 +369,10 @@ export function dbCreateGoal(
   const goals = getGoalsStore();
   const n = normalizeGoalInput(input);
   const nextStatus = options?.status ?? (goals.some((goal) => goal.status === 'active') ? 'parked' : 'active');
+  const now = Date.now();
   const goal: Goal = {
     id: generateId(),
+    name: n.title,
     title: n.title,
     targetOutcome: n.targetOutcome || n.title,
     targetDate: n.targetDate ?? null,
@@ -301,12 +387,29 @@ export function dbCreateGoal(
     urgency: n.urgency,
     payoff: n.payoff,
     whyNow: n.whyNow,
-    createdAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
     status: nextStatus,
     currentFrictionMinutes: 2,
     weeklySeatedSeconds: 0,
     weeklySeatedWeekOf: '',
     visionId: n.visionId ?? null,
+    totalXp: 0,
+    currentStreak: 0,
+    streakDate: '',
+    healthScore: 100,
+    description: n.description,
+    startDate: n.startDate ?? todayString(),
+    endDate: n.targetDate ?? null,
+    whyItMatters: n.whyItMatters,
+    xpTotal: 0,
+    xpTarget: n.xpTarget,
+    buildHealth: 100,
+    currentPhase: 1,
+    difficultyPhase: 1,
+    streakCount: 0,
+    lastCompletedDate: '',
+    performanceStatus: 'on_track',
   };
   const updatedGoals =
     nextStatus === 'active'
@@ -340,6 +443,13 @@ export function dbUpdateGoal(id: string, input: GoalWriteInput): boolean {
           payoff: n.payoff,
           whyNow: n.whyNow,
           visionId: n.visionId ?? g.visionId ?? null,
+          name: n.title,
+          description: n.description,
+          startDate: n.startDate,
+          endDate: n.targetDate ?? null,
+          whyItMatters: n.whyItMatters,
+          xpTarget: n.xpTarget,
+          updatedAt: Date.now(),
         }
       : g
   );
@@ -424,6 +534,10 @@ function normalizeTask(task: DailyTask): DailyTask {
       task.breakDurationMinutes ?? DEFAULT_BREAK_MINUTES,
       defaults.defaultBreakMinutes
     ),
+    tier: task.tier ?? 2,
+    updatedAt: task.updatedAt ?? task.completedAt ?? task.createdAt,
+    linkedSite: task.linkedSite ?? null,
+    isRecoveryTask: task.isRecoveryTask ?? false,
   };
 }
 
@@ -463,6 +577,9 @@ export function dbCreateTask(
     phaseId?: DailyTask['phaseId'];
     focusDurationMinutes?: number;
     breakDurationMinutes?: number;
+    tier?: TaskTier;
+    linkedSite?: string | null;
+    isRecoveryTask?: boolean;
   }
 ): TaskWriteResult {
   if (!goalId) {
@@ -482,6 +599,7 @@ export function dbCreateTask(
   const scheduledWindowStart =
     options?.scheduledWindowStart ??
     (taskType === 'admin' && effortLevel ? findWindowForEffort(effortLevel) : '');
+  const now = Date.now();
   const task: DailyTask = {
     id: generateId(),
     goalId: resolvedGoalId,
@@ -494,7 +612,8 @@ export function dbCreateTask(
     status: 'pending',
     completedAt: null,
     sortOrder: getActiveTasks(tasks, targetDate).length,
-    createdAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
     taskType,
     effortLevel,
     milestoneId: options?.milestoneId ?? null,
@@ -508,6 +627,9 @@ export function dbCreateTask(
       options?.breakDurationMinutes ?? defaults.defaultBreakMinutes,
       defaults.defaultBreakMinutes
     ),
+    tier: options?.tier ?? 2,
+    linkedSite: options?.linkedSite ?? null,
+    isRecoveryTask: options?.isRecoveryTask ?? false,
   };
   save(KEY_TASKS, [...tasks, task]);
   webRefreshResumeContext();
@@ -522,6 +644,7 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
   if (getActiveTasks(tasks, targetDate).length >= DAILY_TASK_CAP) {
     return { ok: false, reason: 'task_limit_reached' };
   }
+  const now = Date.now();
   const task: DailyTask = {
     id: generateId(),
     goalId: source.goalId,
@@ -534,7 +657,8 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
     status: 'pending',
     completedAt: null,
     sortOrder: getActiveTasks(tasks, targetDate).length,
-    createdAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
     taskType: source.taskType ?? 'goal',
     effortLevel: source.effortLevel ?? '',
     milestoneId: source.milestoneId ?? null,
@@ -551,6 +675,9 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
       source.breakDurationMinutes ?? DEFAULT_BREAK_MINUTES,
       getDailyRhythmSettings().defaultBreakMinutes
     ),
+    tier: source.tier ?? 2,
+    linkedSite: source.linkedSite ?? null,
+    isRecoveryTask: source.isRecoveryTask ?? false,
   };
   save(KEY_TASKS, [...tasks, task]);
   webRefreshResumeContext();
@@ -559,22 +686,401 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
 
 export function dbCompleteTask(id: string): boolean {
   const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
-  save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'done' as const, completedAt: Date.now() } : t)));
+  const now = Date.now();
+  save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'done' as const, completedAt: now, updatedAt: now } : t)));
+  const task = tasks.find((candidate) => candidate.id === id);
+  if (task) {
+    dbUpsertDailyXp(task.goalId, task.date);
+    dbRecalcStreakAndHealth(task.goalId);
+  }
   webRefreshResumeContext();
   return true;
 }
 
 export function dbUncompleteTask(id: string): boolean {
   const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
-  save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'pending' as const, completedAt: null } : t)));
+  save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'pending' as const, completedAt: null, updatedAt: Date.now() } : t)));
   webRefreshResumeContext();
   return true;
 }
 
 export function dbDropTask(id: string): boolean {
   const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
-  save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'dropped' as const } : t)));
+  save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'dropped' as const, updatedAt: Date.now() } : t)));
   webRefreshResumeContext();
+  return true;
+}
+
+// ─── Gamification functions ──────────────────────────────────────────────────
+
+const MAX_DIFFICULTY_PHASE: DifficultyPhase = 4;
+
+function normalizeDifficultyPhase(value: number | null | undefined): DifficultyPhase {
+  if (value === 2 || value === 3 || value === 4) return value;
+  return 1;
+}
+
+export function getDailyRequirement(
+  goal: Pick<Goal, 'difficultyPhase'> | { difficultyPhase?: number | null }
+): DailyRequirement {
+  const phase = normalizeDifficultyPhase(goal.difficultyPhase);
+  if (phase === 4) {
+    return {
+      phase,
+      phaseName: 'Operator Mode',
+      tasksRequired: 3,
+      minimumTier: null,
+      weeklyHardTaskRequired: true,
+      missPenalty: 15,
+      minimumCopy: 'Minimum required: 3 tasks.',
+    };
+  }
+  if (phase === 3) {
+    return {
+      phase,
+      phaseName: 'Real Work',
+      tasksRequired: 3,
+      minimumTier: 2,
+      weeklyHardTaskRequired: false,
+      missPenalty: 10,
+      minimumCopy: 'Minimum required: 3 tasks, with at least 1 T2+.',
+    };
+  }
+  if (phase === 2) {
+    return {
+      phase,
+      phaseName: 'Build Rhythm',
+      tasksRequired: 2,
+      minimumTier: null,
+      weeklyHardTaskRequired: false,
+      missPenalty: 5,
+      minimumCopy: 'Minimum required: 2 tasks.',
+    };
+  }
+  return {
+    phase,
+    phaseName: 'Show Up',
+    tasksRequired: 1,
+    minimumTier: null,
+    weeklyHardTaskRequired: false,
+    missPenalty: 2,
+    minimumCopy: 'Minimum required: 1 task.',
+  };
+}
+
+export function isValidDay(
+  goal: Pick<Goal, 'difficultyPhase'> | { difficultyPhase?: number | null },
+  tasks: Array<Pick<DailyTask, 'status' | 'tier'>>
+): boolean {
+  const requirement = getDailyRequirement(goal);
+  const completed = tasks.filter((task) => task.status === 'done');
+  if (completed.length < requirement.tasksRequired) return false;
+  if (requirement.minimumTier) {
+    return completed.some((task) => (task.tier ?? 1) >= requirement.minimumTier!);
+  }
+  return true;
+}
+
+export function applyMissedDayPenalty<
+  T extends Pick<Goal, 'buildHealth' | 'healthScore' | 'performanceStatus' | 'difficultyPhase'>,
+>(goal: T): T {
+  const requirement = getDailyRequirement(goal);
+  const currentHealth = goal.buildHealth ?? goal.healthScore ?? 100;
+  const nextHealth = Math.max(0, currentHealth - requirement.missPenalty);
+  const shouldDecay =
+    requirement.phase === 4 ||
+    (requirement.phase === 3 && (goal.performanceStatus === 'decaying' || currentHealth <= 90));
+
+  return {
+    ...goal,
+    buildHealth: nextHealth,
+    healthScore: nextHealth,
+    performanceStatus: shouldDecay ? 'decaying' : goal.performanceStatus,
+  };
+}
+
+export function maybeUpgradeDifficultyPhase<T extends Pick<Goal, 'difficultyPhase'>>(
+  goal: T,
+  inspections: Array<Pick<WeeklyInspection, 'result'>> = []
+): T {
+  const currentPhase = normalizeDifficultyPhase(goal.difficultyPhase);
+  const latestTwo = inspections.slice(0, 2);
+  const passedTwoInARow = latestTwo.length === 2 && latestTwo.every((row) => row.result === 'pass');
+  if (!passedTwoInARow || currentPhase >= MAX_DIFFICULTY_PHASE) return goal;
+  return {
+    ...goal,
+    difficultyPhase: (currentPhase + 1) as DifficultyPhase,
+  };
+}
+
+function computeTargetXp(goal: Goal): number {
+  if (goal.xpTarget > 0) return goal.xpTarget;
+  const end = goal.endDate ? new Date(goal.endDate).getTime() : Date.now() + 90 * MS_PER_DAY;
+  const totalDays = Math.max(1, Math.round((end - goal.createdAt) / MS_PER_DAY));
+  const workingDays = Math.round((totalDays / 7) * 5);
+  return Math.max(1, workingDays * TIER_XP[2]);
+}
+
+function assignRecoveryTask(goalId: string, missedDate: string): void {
+  const recoveryDate = missedDate < todayString() ? todayString() : missedDate;
+  const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
+  const exists = tasks.some(
+    (task) =>
+      task.goalId === goalId &&
+      task.date === recoveryDate &&
+      task.isRecoveryTask &&
+      task.status !== 'dropped'
+  );
+  if (exists || getActiveTasks(tasks, recoveryDate).length >= DAILY_TASK_CAP) return;
+
+  const now = Date.now();
+  const task: DailyTask = {
+    id: generateId(),
+    goalId,
+    projectId: null,
+    weeklyFocusId: null,
+    sourceTaskId: null,
+    title: 'Recovery task: reset the build',
+    nextStep: 'Do one small task to restart momentum.',
+    date: recoveryDate,
+    status: 'pending',
+    completedAt: null,
+    sortOrder: getActiveTasks(tasks, recoveryDate).length,
+    createdAt: now,
+    updatedAt: now,
+    taskType: 'goal',
+    effortLevel: 'light',
+    milestoneId: null,
+    scheduledWindowStart: '',
+    phaseId: 'phase2',
+    focusDurationMinutes: 25,
+    breakDurationMinutes: 5,
+    tier: 1,
+    linkedSite: null,
+    isRecoveryTask: true,
+  };
+  save(KEY_TASKS, [...tasks, task]);
+}
+
+export function calculateBuildPhase(totalXp: number, targetXp: number): 1 | 2 | 3 | 4 | 5 {
+  if (targetXp <= 0) return 1;
+  const ratio = totalXp / targetXp;
+  if (ratio >= 0.8) return 5;
+  if (ratio >= 0.6) return 4;
+  if (ratio >= 0.4) return 3;
+  if (ratio >= 0.2) return 2;
+  return 1;
+}
+
+export function calculateDifficultyPhase(goalCreatedAtMs: number, asOfMs = Date.now()): DifficultyPhase {
+  const weeksElapsed = Math.floor((asOfMs - goalCreatedAtMs) / (7 * MS_PER_DAY));
+  if (weeksElapsed >= 6) return 4;
+  if (weeksElapsed >= 4) return 3;
+  if (weeksElapsed >= 2) return 2;
+  return 1;
+}
+
+export function calculateGoalStatus(input: {
+  xpTotal: number;
+  xpTarget: number;
+  buildHealth: number;
+  lastCompletedDate?: string | null;
+  createdAt?: number;
+  asOfMs?: number;
+}): GoalPerformanceStatus {
+  const asOfMs = input.asOfMs ?? Date.now();
+  const daysSinceCompletion = input.lastCompletedDate
+    ? Math.floor((asOfMs - new Date(input.lastCompletedDate).getTime()) / MS_PER_DAY)
+    : null;
+  if (input.buildHealth < 40 || (daysSinceCompletion !== null && daysSinceCompletion >= 7)) {
+    return 'decaying';
+  }
+
+  const ratio = input.xpTarget > 0 ? input.xpTotal / input.xpTarget : 1;
+  const daysSinceCreated = input.createdAt ? Math.floor((asOfMs - input.createdAt) / MS_PER_DAY) : 0;
+  if (ratio >= 1.1) return 'ahead';
+  if (daysSinceCreated >= 7 && ratio < 0.75) return 'behind';
+  return 'on_track';
+}
+
+function getStatusCopy(requirement: DailyRequirement, status: GoalPerformanceStatus): string {
+  if (status === 'decaying' && requirement.phase === 4) {
+    return 'Missed target. Recovery task assigned.';
+  }
+  if (requirement.phase === 4) {
+    return 'Operator Mode unlocked. Expectations increased.';
+  }
+  return requirement.minimumCopy;
+}
+
+export function dbGetGameStats(goalId: string): GameStats | null {
+  const goal = getGoalsStore().find((candidate) => candidate.id === goalId);
+  if (!goal) return null;
+  const targetXp = computeTargetXp(goal);
+  const dailyRequirement = getDailyRequirement(goal);
+  const rows = load<DailyXpRow>(KEY_DAILY_XP)
+    .filter((row) => row.goalId === goalId)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 7);
+
+  return {
+    totalXp: goal.totalXp,
+    currentStreak: goal.currentStreak,
+    healthScore: goal.healthScore,
+    targetXp,
+    buildStage: calculateBuildPhase(goal.totalXp, targetXp),
+    dailyExpectation: dailyRequirement.tasksRequired,
+    difficultyPhase: dailyRequirement.phase,
+    dailyRequirement,
+    statusCopy: getStatusCopy(dailyRequirement, goal.performanceStatus),
+    last7Days: rows,
+  };
+}
+
+export function dbUpsertDailyXp(goalId: string, date: string): DailyXpRow | null {
+  const goals = getGoalsStore();
+  const goal = goals.find((candidate) => candidate.id === goalId);
+  if (!goal) return null;
+  const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
+  const completedTasks = tasks.filter((task) => task.goalId === goalId && task.date === date && task.status === 'done');
+  const xpEarned = completedTasks
+    .reduce((sum, task) => sum + TIER_XP[task.tier ?? 2], 0);
+  const expectation = getDailyRequirement(goal).tasksRequired;
+  const met = isValidDay(goal, completedTasks);
+  const rows = load<DailyXpRow>(KEY_DAILY_XP);
+  const existing = rows.find((row) => row.goalId === goalId && row.date === date);
+  const row: DailyXpRow = {
+    id: existing?.id ?? generateId(),
+    goalId,
+    date,
+    xpEarned,
+    expectation,
+    met,
+  };
+  const nextRows = existing
+    ? rows.map((candidate) => (candidate.id === existing.id ? row : candidate))
+    : [...rows, row];
+  save(KEY_DAILY_XP, nextRows);
+
+  const totalXp = nextRows
+    .filter((candidate) => candidate.goalId === goalId)
+    .reduce((sum, candidate) => sum + candidate.xpEarned, 0);
+  const targetXp = computeTargetXp({ ...goal, totalXp, xpTotal: totalXp });
+  const updatedGoal: Goal = {
+    ...goal,
+    totalXp,
+    xpTotal: totalXp,
+    currentPhase: calculateBuildPhase(totalXp, targetXp),
+    difficultyPhase: goal.difficultyPhase,
+    updatedAt: Date.now(),
+  };
+  const finalGoal = met ? updatedGoal : applyMissedDayPenalty(updatedGoal);
+  if (!met && getDailyRequirement(goal).phase === 4) {
+    assignRecoveryTask(goalId, date);
+  }
+  save(KEY_GOALS, goals.map((candidate) => (candidate.id === goalId ? finalGoal : candidate)));
+  return row;
+}
+
+export function dbCalculateBuildPhase(goalId: string): 1 | 2 | 3 | 4 | 5 {
+  const goal = getGoalsStore().find((candidate) => candidate.id === goalId);
+  if (!goal) return 1;
+  const phase = calculateBuildPhase(goal.totalXp, computeTargetXp(goal));
+  save(KEY_GOALS, getGoalsStore().map((candidate) => (candidate.id === goalId ? { ...candidate, currentPhase: phase, updatedAt: Date.now() } : candidate)));
+  return phase;
+}
+
+export function dbCalculateDifficultyPhase(goalId: string): DifficultyPhase {
+  const goal = getGoalsStore().find((candidate) => candidate.id === goalId);
+  if (!goal) return 1;
+  return normalizeDifficultyPhase(goal.difficultyPhase);
+}
+
+export function dbCalculateGoalStatus(goalId: string): GoalPerformanceStatus {
+  const goal = getGoalsStore().find((candidate) => candidate.id === goalId);
+  if (!goal) return 'on_track';
+  const status = calculateGoalStatus({
+    xpTotal: goal.totalXp,
+    xpTarget: computeTargetXp(goal),
+    buildHealth: goal.buildHealth,
+    lastCompletedDate: goal.lastCompletedDate,
+    createdAt: goal.createdAt,
+  });
+  save(KEY_GOALS, getGoalsStore().map((candidate) => (candidate.id === goalId ? { ...candidate, performanceStatus: status, updatedAt: Date.now() } : candidate)));
+  return status;
+}
+
+export function dbMaybeUpgradeDifficultyPhase(goalId: string): DifficultyPhase {
+  const goals = getGoalsStore();
+  const goal = goals.find((candidate) => candidate.id === goalId);
+  if (!goal) return 1;
+  const inspections = load<WeeklyInspection>(KEY_WEEKLY_INSPECTIONS)
+    .filter((row) => row.goalId === goalId)
+    .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+    .slice(0, 2);
+  const nextGoal = maybeUpgradeDifficultyPhase(goal, inspections);
+  if (nextGoal.difficultyPhase !== goal.difficultyPhase) {
+    save(KEY_GOALS, goals.map((candidate) => (candidate.id === goalId ? { ...candidate, difficultyPhase: nextGoal.difficultyPhase, updatedAt: Date.now() } : candidate)));
+  }
+  return normalizeDifficultyPhase(nextGoal.difficultyPhase);
+}
+
+export function dbRecalcStreakAndHealth(goalId: string): boolean {
+  const goals = getGoalsStore();
+  const goal = goals.find((candidate) => candidate.id === goalId);
+  if (!goal) return false;
+  const rows = load<DailyXpRow>(KEY_DAILY_XP)
+    .filter((row) => row.goalId === goalId)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  let streak = 0;
+  let prevDate: string | null = null;
+  for (const row of rows) {
+    if (!row.met) break;
+    if (prevDate !== null) {
+      const diff = (new Date(prevDate).getTime() - new Date(row.date).getTime()) / MS_PER_DAY;
+      if (diff > 1) break;
+    }
+    streak++;
+    prevDate = row.date;
+  }
+  let health = 100;
+  const requirement = getDailyRequirement(goal);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    health = rows[i].met ? Math.min(100, health + 2) : Math.max(0, health - requirement.missPenalty);
+  }
+  const lastCompletedDate = streak > 0 ? rows[0]?.date ?? '' : '';
+  const targetXp = computeTargetXp(goal);
+  const upgradedGoal = maybeUpgradeDifficultyPhase(goal);
+  const repeatedPhase3Miss = requirement.phase === 3 && rows[0]?.met === false && rows[1]?.met === false;
+  const performanceStatus =
+    (requirement.phase === 4 && rows[0]?.met === false) || repeatedPhase3Miss
+      ? 'decaying'
+      : calculateGoalStatus({
+          xpTotal: goal.totalXp,
+          xpTarget: targetXp,
+          buildHealth: health,
+          lastCompletedDate,
+          createdAt: goal.createdAt,
+        });
+  save(
+    KEY_GOALS,
+    goals.map((candidate) =>
+      candidate.id === goalId
+        ? {
+            ...candidate,
+            currentStreak: streak,
+            streakCount: streak,
+            streakDate: rows[0]?.date ?? '',
+            healthScore: health,
+            buildHealth: health,
+            difficultyPhase: upgradedGoal.difficultyPhase,
+            lastCompletedDate,
+            performanceStatus,
+            updatedAt: Date.now(),
+          }
+        : candidate
+    )
+  );
   return true;
 }
 

@@ -28,9 +28,11 @@ import type {
   OnboardingDraft,
   Project,
   ResumeContext,
+  TaskTier,
   Vision,
   VisionWriteInput,
 } from '../src/types';
+import { TIER_XP } from '../src/types';
 import {
   formatDate,
   formatDisplayDate,
@@ -591,6 +593,14 @@ function GoalModal({
   );
 }
 
+const TIER_LABELS: { tier: TaskTier; label: string }[] = [
+  { tier: 1, label: 'T1 · 5xp' },
+  { tier: 2, label: 'T2 · 15xp' },
+  { tier: 3, label: 'T3 · 40xp' },
+  { tier: 4, label: 'T4 · 100xp' },
+  { tier: 5, label: 'T5 · 300xp' },
+];
+
 function TaskModal({
   open,
   title,
@@ -606,11 +616,12 @@ function TaskModal({
   selectedProjectId: string | null;
   initialTitle?: string;
   onClose: () => void;
-  onSubmit: (title: string, nextStep: string, projectId: string | null) => void;
+  onSubmit: (title: string, nextStep: string, projectId: string | null, tier: TaskTier) => void;
 }) {
   const [taskTitle, setTaskTitle] = useState(initialTitle ?? '');
   const [nextStep, setNextStep] = useState('');
   const [projectId, setProjectId] = useState<string | null>(selectedProjectId);
+  const [tier, setTier] = useState<TaskTier>(2);
 
   useEffect(() => {
     if (!open) {
@@ -620,6 +631,7 @@ function TaskModal({
     setTaskTitle(initialTitle ?? '');
     setNextStep('');
     setProjectId(selectedProjectId);
+    setTier(2);
   }, [initialTitle, open, selectedProjectId]);
 
   const canSubmit = taskTitle.trim().length > 0;
@@ -634,7 +646,7 @@ function TaskModal({
             return;
           }
 
-          onSubmit(taskTitle.trim(), nextStep.trim(), projectId);
+          onSubmit(taskTitle.trim(), nextStep.trim(), projectId, tier);
           onClose();
         }}
       >
@@ -667,6 +679,31 @@ function TaskModal({
             ))}
           </select>
         </label>
+
+        <div className="field">
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>Tier</span>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+            {TIER_LABELS.map(({ tier: t, label }) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTier(t)}
+                style={{
+                  padding: '0.25rem 0.6rem',
+                  borderRadius: '999px',
+                  border: '1px solid',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  borderColor: tier === t ? 'var(--accent, #6c63ff)' : 'var(--border, #ccc)',
+                  background: tier === t ? 'var(--accent, #6c63ff)' : 'transparent',
+                  color: tier === t ? '#fff' : 'inherit',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="form-actions">
           <button className="secondary-button" type="button" onClick={onClose}>
@@ -1391,6 +1428,9 @@ function AppShell() {
             Review
             {reviewDue ? <span className="badge">Due</span> : null}
           </NavLink>
+          <NavLink className="nav-link" to="/build">
+            Build
+          </NavLink>
           <NavLink className="nav-link" to="/backup">
             Backup
           </NavLink>
@@ -1969,13 +2009,14 @@ function CalendarPage() {
         projects={projects}
         selectedProjectId={null}
         onClose={() => setTaskModalOpen(false)}
-        onSubmit={(title, nextStep, projectId) => {
+        onSubmit={(title, nextStep, projectId, tier) => {
           const result = mutate(() =>
             activeGoal
               ? db.dbCreateTask(title, activeGoal.id, weeklyFocus?.id, {
                   date: selectedDate,
                   nextStep,
                   projectId,
+                  tier,
                 })
               : { ok: false as const, reason: 'missing_goal' as const }
           );
@@ -2808,6 +2849,138 @@ function FocusPage() {
   );
 }
 
+const BUILD_STAGES: Record<number, { icon: string; label: string }> = {
+  1: { icon: '░░░░░░░░░', label: 'Empty plot' },
+  2: { icon: '🏗 ░░░░░░', label: 'Foundations' },
+  3: { icon: '🪵 ░░░░░', label: 'Structure up' },
+  4: { icon: '🏠 ░░░', label: 'Walls & roof' },
+  5: { icon: '🏛️ ████', label: 'Mansion' },
+};
+
+function BuildPage() {
+  const { goal, allTasks, stats } = useDataSnapshot(() => {
+    const activeGoal = db.dbGetActiveGoal();
+    return {
+      goal: activeGoal,
+      allTasks: db.dbGetAllTasks(),
+      stats: activeGoal ? db.dbGetGameStats(activeGoal.id) : null,
+    };
+  });
+
+  const today = todayString();
+
+  if (!goal) {
+    return (
+      <div className="page-content stack">
+        <p className="eyebrow">Build</p>
+        <p>Set an active goal to start building.</p>
+      </div>
+    );
+  }
+
+  const goalCreatedAt = goal.createdAt;
+  const goalTasks = allTasks.filter((t) => t.goalId === goal.id && t.status === 'done');
+  const totalXp = stats?.totalXp ?? goalTasks.reduce((sum, t) => sum + TIER_XP[t.tier ?? 2], 0);
+  const daysSinceCreation = Math.floor((Date.now() - goalCreatedAt) / (24 * 60 * 60 * 1000));
+  const targetXp = stats?.targetXp ?? Math.max(daysSinceCreation * TIER_XP[2], TIER_XP[2]);
+  const buildStage = stats?.buildStage ?? (Math.min(Math.max(Math.ceil((totalXp / targetXp) * 5), 1), 5) as 1 | 2 | 3 | 4 | 5);
+  const dailyRequirement = stats?.dailyRequirement ?? db.getDailyRequirement(goal);
+  const statusCopy = stats?.statusCopy ?? dailyRequirement.minimumCopy;
+
+  // Build last-7-days history
+  const last7: Array<{ date: string; xpEarned: number; expectation: number; met: boolean }> = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateStr = formatDate(d);
+    const dayExp = dailyRequirement.tasksRequired;
+    const dayXp = goalTasks
+      .filter((t) => t.date === dateStr)
+      .reduce((sum, t) => sum + TIER_XP[t.tier ?? 2], 0);
+    const dayTasks = allTasks.filter((t) => t.goalId === goal.id && t.date === dateStr && t.status === 'done');
+    last7.push({ date: dateStr, xpEarned: dayXp, expectation: dayExp, met: db.isValidDay(goal, dayTasks) });
+  }
+
+  // Compute streak and health from last-7-days (simple approximation for web)
+  let streak = 0;
+  for (let i = last7.length - 1; i >= 0; i--) {
+    const day = last7[i];
+    if (day.date === today && day.xpEarned === 0) continue; // don't break on today if not yet started
+    if (day.met) streak++;
+    else break;
+  }
+  const healthScore = Math.min(
+    100,
+    Math.max(0, last7.reduce((h, day) => h + (day.met ? 2 : -5), 100))
+  );
+
+  const stageInfo = BUILD_STAGES[buildStage];
+  const xpProgress = targetXp > 0 ? Math.min(totalXp / targetXp, 1) : 0;
+
+  return (
+    <div className="page-content stack">
+      <p className="eyebrow">Build</p>
+      <h2 style={{ margin: 0 }}>{goal.title}</h2>
+
+      <div style={{ padding: '1.5rem', background: 'var(--surface, #f5f5f5)', borderRadius: '0.75rem' }}>
+        <p className="eyebrow" style={{ marginBottom: '0.5rem' }}>Phase {dailyRequirement.phase}: {dailyRequirement.phaseName}</p>
+        <div style={{ fontWeight: 700, marginBottom: '1rem' }}>{statusCopy}</div>
+        <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>{stageInfo.icon}</div>
+        <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>Stage {buildStage}: {stageInfo.label}</div>
+        <div style={{ marginTop: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted, #888)', marginBottom: '0.25rem' }}>
+            <span>{totalXp} XP earned</span>
+            <span>{targetXp} XP target</span>
+          </div>
+          <div style={{ height: '8px', background: 'var(--border, #e0e0e0)', borderRadius: '4px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${xpProgress * 100}%`, background: 'var(--accent, #6c63ff)', borderRadius: '4px' }} />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ flex: 1, padding: '1rem', background: 'var(--surface, #f5f5f5)', borderRadius: '0.75rem', textAlign: 'center' }}>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{streak}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>day streak</div>
+        </div>
+        <div style={{ flex: 1, padding: '1rem', background: 'var(--surface, #f5f5f5)', borderRadius: '0.75rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted, #888)', marginBottom: '0.25rem' }}>
+            <span>Health</span>
+            <span>{healthScore}/100</span>
+          </div>
+          <div style={{ height: '8px', background: 'var(--border, #e0e0e0)', borderRadius: '4px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${healthScore}%`, background: healthScore >= 60 ? '#22c55e' : healthScore >= 30 ? '#f59e0b' : '#ef4444', borderRadius: '4px' }} />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p className="eyebrow">Last 7 days · {dailyRequirement.minimumCopy}</p>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {last7.map((day) => (
+            <div key={day.date} style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: '1rem' }}>{day.met ? '●' : day.xpEarned > 0 ? '◐' : '○'}</div>
+              <div style={{ fontSize: '0.6rem', color: 'var(--text-muted, #888)' }}>{day.date.slice(5)}</div>
+              <div style={{ fontSize: '0.65rem', fontWeight: 600 }}>{day.xpEarned}xp</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: '1rem', background: 'var(--surface, #f5f5f5)', borderRadius: '0.75rem' }}>
+        <p className="eyebrow" style={{ marginBottom: '0.5rem' }}>Tier guide</p>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {([1, 2, 3, 4, 5] as TaskTier[]).map((t) => (
+            <span key={t} style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem', borderRadius: '999px', border: '1px solid var(--border, #ccc)' }}>
+              T{t} · {TIER_XP[t]}xp
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RequireOnboarding({ onboardingComplete }: { onboardingComplete: boolean }) {
   return onboardingComplete ? <Outlet /> : <Navigate to="/onboarding" replace />;
 }
@@ -2831,6 +3004,7 @@ export default function App() {
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/goals" element={<GoalsPage />} />
           <Route path="/review" element={<ReviewPage />} />
+          <Route path="/build" element={<BuildPage />} />
         </Route>
         <Route path="/focus" element={<FocusPage />} />
       </Route>

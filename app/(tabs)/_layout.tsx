@@ -76,6 +76,19 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="build"
+        options={{
+          title: 'Build',
+          tabBarIcon: ({ focused }) => (
+            <MaterialCommunityIcons
+              name={focused ? 'home-city' : 'home-city-outline'}
+              size={20}
+              color={focused ? C.tabActive : C.tabInactive}
+            />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

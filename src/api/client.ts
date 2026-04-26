@@ -4,9 +4,13 @@ import type {
   DailyReview,
   DailyTask,
   DailyPhaseId,
+  DailyXpRow,
+  DifficultyPhase,
   FocusExitReason,
   FocusSession,
+  GameStats,
   Goal,
+  GoalPerformanceStatus,
   GoalWriteInput,
   OnboardingDraft,
   Project,
@@ -122,6 +126,13 @@ export async function getActiveGoal(): Promise<Goal | null> {
   return rpc('getActiveGoal');
 }
 
+export async function createDefaultGoal(): Promise<Goal | null> {
+  if (IS_WEB) { const r = webDb.dbCreateDefaultGoal(); notifyDataChanged(); return r; }
+  const result = await rpc<Goal | null>('createDefaultGoal');
+  notifyDataChanged();
+  return result;
+}
+
 export async function createGoal(input: GoalWriteInput): Promise<Goal | null> {
   if (IS_WEB) { const r = webDb.dbCreateGoal(input); notifyDataChanged(); return r; }
   const result = await rpc<Goal | null>('createGoal', { input });
@@ -176,6 +187,7 @@ export async function createTask(input: {
   weeklyFocusId?: string | null;
   nextStep?: string;
   projectId?: string | null;
+  tier?: number;
   options?: {
     date?: string;
     sourceTaskId?: string | null;
@@ -201,6 +213,7 @@ export async function createTask(input: {
       phaseId: input.options?.phaseId,
       focusDurationMinutes: input.options?.focusDurationMinutes,
       breakDurationMinutes: input.options?.breakDurationMinutes,
+      tier: input.tier as DailyTask['tier'] | undefined,
     });
     notifyDataChanged();
     return r;
@@ -446,6 +459,53 @@ export async function deleteBrainDumpItem(id: string): Promise<boolean> {
 export async function updateBrainDumpItem(id: string, text: string): Promise<boolean> {
   if (IS_WEB) { const r = webDb.dbUpdateBrainDumpItem(id, text); notifyDataChanged(); return r; }
   const result = await rpc<boolean>('updateBrainDumpItem', { id, text });
+  notifyDataChanged();
+  return result;
+}
+
+// ─── Gamification ─────────────────────────────────────────────────────────────
+
+export async function getGameStats(goalId: string): Promise<GameStats | null> {
+  if (IS_WEB) return webDb.dbGetGameStats(goalId);
+  return rpc<GameStats | null>('getGameStats', { goalId });
+}
+
+export async function upsertDailyXp(goalId: string, date: string): Promise<DailyXpRow | null> {
+  if (IS_WEB) { const r = webDb.dbUpsertDailyXp(goalId, date); notifyDataChanged(); return r; }
+  const result = await rpc<DailyXpRow | null>('upsertDailyXp', { goalId, date });
+  notifyDataChanged();
+  return result;
+}
+
+export async function recalcStreakAndHealth(goalId: string): Promise<boolean> {
+  if (IS_WEB) { const r = webDb.dbRecalcStreakAndHealth(goalId); notifyDataChanged(); return r; }
+  return rpc<boolean>('recalcStreakAndHealth', { goalId });
+}
+
+export async function calculateGoalStatus(goalId: string): Promise<GoalPerformanceStatus> {
+  if (IS_WEB) { const r = webDb.dbCalculateGoalStatus(goalId); notifyDataChanged(); return r; }
+  const result = await rpc<GoalPerformanceStatus>('calculateGoalStatus', { goalId });
+  notifyDataChanged();
+  return result;
+}
+
+export async function calculateBuildPhase(goalId: string): Promise<1 | 2 | 3 | 4 | 5> {
+  if (IS_WEB) { const r = webDb.dbCalculateBuildPhase(goalId); notifyDataChanged(); return r; }
+  const result = await rpc<1 | 2 | 3 | 4 | 5>('calculateBuildPhase', { goalId });
+  notifyDataChanged();
+  return result;
+}
+
+export async function calculateDifficultyPhase(goalId: string): Promise<DifficultyPhase> {
+  if (IS_WEB) { const r = webDb.dbCalculateDifficultyPhase(goalId); notifyDataChanged(); return r; }
+  const result = await rpc<DifficultyPhase>('calculateDifficultyPhase', { goalId });
+  notifyDataChanged();
+  return result;
+}
+
+export async function maybeUpgradeDifficultyPhase(goalId: string): Promise<DifficultyPhase> {
+  if (IS_WEB) { const r = webDb.dbMaybeUpgradeDifficultyPhase(goalId); notifyDataChanged(); return r; }
+  const result = await rpc<DifficultyPhase>('maybeUpgradeDifficultyPhase', { goalId });
   notifyDataChanged();
   return result;
 }
