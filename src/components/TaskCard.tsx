@@ -36,6 +36,7 @@ export function TaskCard({ task, isNextUp = false, onToggle, onFocus, onDrop }: 
     task.effortLevel ? task.effortLevel : null,
     task.scheduledWindowStart ? `Window ${task.scheduledWindowStart}` : null,
     `${task.focusDurationMinutes}/${task.breakDurationMinutes} min`,
+    `T${task.tier ?? 2}`,
   ].filter(Boolean) as string[];
 
   // Clamp revealed drop-zone width for the background hint

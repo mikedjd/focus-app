@@ -16,8 +16,10 @@ import { isReviewDue } from '../../src/api/client';
 import { useGoals } from '../../src/hooks/useGoals';
 import { useDailyReview } from '../../src/hooks/useDailyReview';
 import { usePrevWeekStart, useWeeklyReview } from '../../src/hooks/useWeeklyReview';
+import { useGameStats } from '../../src/hooks/useGameStats';
 import { useAppStore } from '../../src/store/useAppStore';
-import { formatDurationCompact, formatWeekRange } from '../../src/utils/dates';
+import { formatDurationCompact, formatWeekRange, getWeekStart } from '../../src/utils/dates';
+import type { GameStats } from '../../src/types';
 
 const DRIFT_REASON_LABELS: Record<string, string> = {
   distracted: 'Got distracted',
@@ -42,6 +44,89 @@ function getWhatBrokeValue(review: { whatDrifted: string; driftReasons: string[]
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
+
+function WeeklyInspection({ stats }: { stats: GameStats }) {
+  const weekStart = getWeekStart();
+  const weekRows = stats.last7Days.filter((row) => row.date >= weekStart);
+  const validDays = weekRows.filter((row) => row.met).length;
+  const weekXp = weekRows.reduce((sum, row) => sum + row.xpEarned, 0);
+  const passed = validDays >= 5;
+  const inspectionColor = passed ? C.success : C.danger;
+  const inspectionBg = passed ? C.successLight : '#FFF5F5';
+
+  return (
+    <View style={inspStyles.container}>
+      <Text style={inspStyles.label}>WEEKLY INSPECTION</Text>
+      <View style={[inspStyles.result, { backgroundColor: inspectionBg, borderColor: inspectionColor }]}>
+        <Text style={[inspStyles.verdict, { color: inspectionColor }]}>
+          {passed ? '✓ Pass' : '✗ Fail'}
+        </Text>
+        <Text style={inspStyles.detail}>
+          {validDays}/5 valid days · {weekXp} xp this week
+        </Text>
+        <Text style={inspStyles.detail}>{stats.dailyRequirement.minimumCopy}</Text>
+      </View>
+      {stats.last7Days.length > 0 ? (
+        <View style={inspStyles.dotRow}>
+          {[...stats.last7Days]
+            .sort((a, b) => a.date.localeCompare(b.date))
+            .map((row) => (
+              <View key={row.id} style={inspStyles.dotItem}>
+                <View style={[inspStyles.dot, { backgroundColor: row.met ? C.success : C.danger }]} />
+                <Text style={inspStyles.dotDate}>{row.date.slice(5)}</Text>
+              </View>
+            ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const inspStyles = StyleSheet.create({
+  container: {
+    marginTop: 24,
+    gap: 10,
+  },
+  label: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: C.accent,
+    letterSpacing: 1,
+  },
+  result: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 4,
+  },
+  verdict: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  detail: {
+    fontSize: 13,
+    color: '#555',
+  },
+  dotRow: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  dotItem: {
+    alignItems: 'center',
+    gap: 3,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  dotDate: {
+    fontSize: 10,
+    color: '#888',
+  },
+});
 
 function SectionLabel({ children }: { children: string }) {
   return <Text style={sectionStyles.label}>{children}</Text>;
@@ -106,6 +191,7 @@ const sectionStyles = StyleSheet.create({
 
 export default function ReviewScreen() {
   const { activeGoal, setWeeklyFocusText, refresh: refreshGoals } = useGoals();
+  const { stats: gameStats } = useGameStats(activeGoal?.id ?? null);
   const setReviewDue = useAppStore((state) => state.setReviewDue);
   const prevWeekOf = usePrevWeekStart();
   const { review, weekStats, saveReview, refresh: refreshReview } = useWeeklyReview(prevWeekOf);
@@ -391,6 +477,11 @@ export default function ReviewScreen() {
               {saved ? 'Update Review' : 'Complete Review'}
             </Text>
           </TouchableOpacity>
+
+          {/* ─── Weekly Inspection ────────────────────────────── */}
+          {gameStats ? (
+            <WeeklyInspection stats={gameStats} />
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

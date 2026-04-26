@@ -34,6 +34,7 @@ export function useTodayTasks(goalId: string | null) {
         weeklyFocusId: goalId ? weeklyFocusId : null,
         nextStep: input.nextStep,
         projectId: goalId ? input.projectId ?? null : null,
+        tier: input.tier,
         options: {
           phaseId: input.phaseId,
           focusDurationMinutes: input.focusDurationMinutes,

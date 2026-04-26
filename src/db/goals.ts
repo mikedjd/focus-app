@@ -21,6 +21,22 @@ type GoalRow = {
   current_friction_minutes?: number | null;
   weekly_seated_seconds?: number | null;
   weekly_seated_week_of?: string | null;
+  vision_id?: string | null;
+  total_xp?: number | null;
+  current_streak?: number | null;
+  streak_date?: string | null;
+  health_score?: number | null;
+  description?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  why_it_matters?: string | null;
+  xp_target?: number | null;
+  build_health?: number | null;
+  current_phase?: number | null;
+  difficulty_phase?: number | null;
+  last_completed_date?: string | null;
+  performance_status?: Goal['performanceStatus'] | null;
+  updated_at?: number | null;
 };
 
 type WeeklyFocusRow = {
@@ -45,10 +61,17 @@ type NormalizedGoalInput = {
 };
 
 function mapGoal(row: GoalRow): Goal {
+  const createdAt = row.created_at;
+  const updatedAt = row.updated_at ?? createdAt;
+  const title = row.title;
+  const totalXp = row.total_xp ?? 0;
+  const healthScore = row.health_score ?? 100;
+  const currentStreak = row.current_streak ?? 0;
   return {
     id: row.id,
-    title: row.title,
-    targetOutcome: row.target_outcome || row.title,
+    name: title,
+    title,
+    targetOutcome: row.target_outcome || title,
     targetDate: row.target_date,
     metric: row.metric || '',
     why: row.anchor_why || row.why,
@@ -57,7 +80,8 @@ function mapGoal(row: GoalRow): Goal {
     costOfDrift: row.cost_of_drift || '',
     anchorWhy: row.anchor_why || row.why,
     anchorDrift: row.anchor_drift || '',
-    createdAt: row.created_at,
+    createdAt,
+    updatedAt,
     status: row.status as Goal['status'],
     importance: 0,
     urgency: 0,
@@ -66,6 +90,23 @@ function mapGoal(row: GoalRow): Goal {
     currentFrictionMinutes: row.current_friction_minutes ?? 2,
     weeklySeatedSeconds: row.weekly_seated_seconds ?? 0,
     weeklySeatedWeekOf: row.weekly_seated_week_of ?? '',
+    visionId: row.vision_id ?? null,
+    totalXp,
+    currentStreak,
+    streakDate: row.streak_date ?? '',
+    healthScore,
+    description: row.description ?? '',
+    startDate: row.start_date ?? null,
+    endDate: row.end_date ?? row.target_date,
+    whyItMatters: row.why_it_matters || row.anchor_why || row.why,
+    xpTotal: totalXp,
+    xpTarget: row.xp_target ?? 0,
+    buildHealth: row.build_health ?? healthScore,
+    currentPhase: row.current_phase ?? 1,
+    difficultyPhase: row.difficulty_phase ?? 1,
+    streakCount: currentStreak,
+    lastCompletedDate: row.last_completed_date ?? '',
+    performanceStatus: row.performance_status ?? 'on_track',
   };
 }
 
@@ -118,11 +159,30 @@ function normalizeGoalInput(input: GoalWriteInput): NormalizedGoalInput {
   };
 }
 
+export function dbCreateDefaultGoal(): Goal | null {
+  const today = new Date().toISOString().slice(0, 10);
+  return dbCreateGoal({
+    title: 'Build momentum',
+    targetOutcome: 'Create a steady weekly goal rhythm',
+    targetDate: null,
+    metric: 'XP earned',
+    why: 'A simple default goal keeps tasks anchored until a specific goal is chosen.',
+    practicalReason: 'Keep daily tasks grouped.',
+    emotionalReason: 'Make progress visible.',
+    costOfDrift: 'Tasks drift without an anchor.',
+    description: 'Default goal project',
+    startDate: today,
+    whyItMatters: 'A small visible build is easier to return to.',
+  });
+}
+
 export function dbCreateGoal(input: GoalWriteInput): Goal | null {
   return runDb('create goal', null, (db) => {
     const normalized = normalizeGoalInput(input);
+    const now = Date.now();
     const goal: Goal = {
       id: generateId(),
+      name: normalized.title,
       title: normalized.title,
       targetOutcome: normalized.targetOutcome || normalized.title,
       targetDate: normalized.targetDate ?? null,
@@ -137,11 +197,29 @@ export function dbCreateGoal(input: GoalWriteInput): Goal | null {
       urgency: 0,
       payoff: 0,
       whyNow: '',
-      createdAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
       status: 'active',
       currentFrictionMinutes: 2,
       weeklySeatedSeconds: 0,
       weeklySeatedWeekOf: '',
+      visionId: null,
+      totalXp: 0,
+      currentStreak: 0,
+      streakDate: '',
+      healthScore: 100,
+      description: cleanText(input.description),
+      startDate: cleanText(input.startDate) || new Date(now).toISOString().slice(0, 10),
+      endDate: normalized.targetDate ?? null,
+      whyItMatters: cleanText(input.whyItMatters) || normalized.anchorWhy || '',
+      xpTotal: 0,
+      xpTarget: input.xpTarget ?? 0,
+      buildHealth: 100,
+      currentPhase: 1,
+      difficultyPhase: 1,
+      streakCount: 0,
+      lastCompletedDate: '',
+      performanceStatus: 'on_track',
     };
 
     db.runSync(
@@ -158,8 +236,19 @@ export function dbCreateGoal(input: GoalWriteInput): Goal | null {
         anchor_why,
         anchor_drift,
         created_at,
-        status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        status,
+        description,
+        start_date,
+        end_date,
+        why_it_matters,
+        xp_target,
+        build_health,
+        current_phase,
+        difficulty_phase,
+        last_completed_date,
+        performance_status,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         goal.id,
         goal.title,
@@ -174,6 +263,17 @@ export function dbCreateGoal(input: GoalWriteInput): Goal | null {
         goal.anchorDrift,
         goal.createdAt,
         goal.status,
+        goal.description,
+        goal.startDate,
+        goal.endDate,
+        goal.whyItMatters,
+        goal.xpTarget,
+        goal.buildHealth,
+        goal.currentPhase,
+        goal.difficultyPhase,
+        goal.lastCompletedDate,
+        goal.performanceStatus,
+        goal.updatedAt,
       ]
     );
 
@@ -195,7 +295,13 @@ export function dbUpdateGoal(id: string, input: GoalWriteInput): boolean {
            emotional_reason = ?,
            cost_of_drift = ?,
            anchor_why = ?,
-           anchor_drift = ?
+           anchor_drift = ?,
+           description = ?,
+           start_date = ?,
+           end_date = ?,
+           why_it_matters = ?,
+           xp_target = ?,
+           updated_at = ?
        WHERE id = ?`,
       [
         normalized.title,
@@ -208,6 +314,12 @@ export function dbUpdateGoal(id: string, input: GoalWriteInput): boolean {
         normalized.costOfDrift,
         normalized.anchorWhy,
         normalized.anchorDrift,
+        cleanText(input.description),
+        cleanText(input.startDate) || null,
+        normalized.targetDate,
+        cleanText(input.whyItMatters) || normalized.anchorWhy,
+        input.xpTarget ?? 0,
+        Date.now(),
         id,
       ]
     );

@@ -180,6 +180,64 @@ function bootstrapDatabase() {
     'weekly_seated_week_of',
     "ALTER TABLE goals ADD COLUMN weekly_seated_week_of TEXT NOT NULL DEFAULT ''"
   );
+
+  // Gamification — v11
+  ensureColumn('daily_tasks', 'tier', 'ALTER TABLE daily_tasks ADD COLUMN tier INTEGER NOT NULL DEFAULT 2');
+  ensureColumn('daily_tasks', 'linked_site', 'ALTER TABLE daily_tasks ADD COLUMN linked_site TEXT');
+  ensureColumn('daily_tasks', 'is_recovery_task', 'ALTER TABLE daily_tasks ADD COLUMN is_recovery_task INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('daily_tasks', 'updated_at', 'ALTER TABLE daily_tasks ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('goals', 'total_xp', 'ALTER TABLE goals ADD COLUMN total_xp INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('goals', 'current_streak', 'ALTER TABLE goals ADD COLUMN current_streak INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('goals', 'streak_date', "ALTER TABLE goals ADD COLUMN streak_date TEXT NOT NULL DEFAULT ''");
+  ensureColumn('goals', 'health_score', 'ALTER TABLE goals ADD COLUMN health_score INTEGER NOT NULL DEFAULT 100');
+  ensureColumn('goals', 'description', "ALTER TABLE goals ADD COLUMN description TEXT NOT NULL DEFAULT ''");
+  ensureColumn('goals', 'start_date', 'ALTER TABLE goals ADD COLUMN start_date TEXT');
+  ensureColumn('goals', 'end_date', 'ALTER TABLE goals ADD COLUMN end_date TEXT');
+  ensureColumn('goals', 'why_it_matters', "ALTER TABLE goals ADD COLUMN why_it_matters TEXT NOT NULL DEFAULT ''");
+  ensureColumn('goals', 'xp_target', 'ALTER TABLE goals ADD COLUMN xp_target INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('goals', 'build_health', 'ALTER TABLE goals ADD COLUMN build_health INTEGER NOT NULL DEFAULT 100');
+  ensureColumn('goals', 'current_phase', 'ALTER TABLE goals ADD COLUMN current_phase INTEGER NOT NULL DEFAULT 1');
+  ensureColumn('goals', 'difficulty_phase', 'ALTER TABLE goals ADD COLUMN difficulty_phase INTEGER NOT NULL DEFAULT 1');
+  ensureColumn('goals', 'last_completed_date', "ALTER TABLE goals ADD COLUMN last_completed_date TEXT NOT NULL DEFAULT ''");
+  ensureColumn('goals', 'performance_status', "ALTER TABLE goals ADD COLUMN performance_status TEXT NOT NULL DEFAULT 'on_track'");
+  ensureColumn('goals', 'updated_at', 'ALTER TABLE goals ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS daily_xp (
+      id TEXT PRIMARY KEY,
+      goal_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      xp_earned INTEGER NOT NULL DEFAULT 0,
+      expectation INTEGER NOT NULL DEFAULT 0,
+      met INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(goal_id, date),
+      FOREIGN KEY (goal_id) REFERENCES goals(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_xp_goal_date ON daily_xp(goal_id, date DESC);
+
+    CREATE TABLE IF NOT EXISTS weekly_inspections (
+      id TEXT PRIMARY KEY,
+      goal_id TEXT NOT NULL,
+      week_start TEXT NOT NULL,
+      week_end TEXT NOT NULL,
+      xp_earned INTEGER NOT NULL DEFAULT 0,
+      tasks_completed INTEGER NOT NULL DEFAULT 0,
+      hard_tasks_completed INTEGER NOT NULL DEFAULT 0,
+      result TEXT NOT NULL DEFAULT 'partial',
+      recovery_task_created INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      UNIQUE(goal_id, week_start),
+      FOREIGN KEY (goal_id) REFERENCES goals(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_weekly_inspections_goal_week
+      ON weekly_inspections(goal_id, week_start DESC);
+
+    UPDATE goals SET end_date = target_date WHERE end_date IS NULL AND target_date IS NOT NULL;
+    UPDATE goals SET why_it_matters = COALESCE(NULLIF(anchor_why, ''), why) WHERE TRIM(COALESCE(why_it_matters, '')) = '';
+    UPDATE goals SET build_health = health_score WHERE build_health = 100 AND health_score != 100;
+    UPDATE goals SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = 0;
+    UPDATE daily_tasks SET updated_at = COALESCE(completed_at, created_at) WHERE updated_at IS NULL OR updated_at = 0;
+  `);
 }
 
 function hasColumn(tableName, columnName) {
@@ -203,6 +261,9 @@ const commands = {
   },
   getActiveGoal() {
     return getActiveGoal();
+  },
+  createDefaultGoal() {
+    return createDefaultGoal();
   },
   createGoal({ input }) {
     return createGoal(input);
@@ -228,8 +289,8 @@ const commands = {
   getTaskById({ id }) {
     return getTaskById(id);
   },
-  createTask({ title, goalId, weeklyFocusId = null, nextStep = '', projectId = null, options = {} }) {
-    return createTask(title, goalId, weeklyFocusId, nextStep, { ...options, projectId });
+  createTask({ title, goalId, weeklyFocusId = null, nextStep = '', projectId = null, tier, options = {} }) {
+    return createTask(title, goalId, weeklyFocusId, nextStep, { ...options, projectId, tier });
   },
   carryForwardTask({ taskId }) {
     return carryForwardTask(taskId);
@@ -303,7 +364,397 @@ const commands = {
   removeContext({ key }) {
     return removeContext(key);
   },
+
+  // ── Gamification ──────────────────────────────────────────────────────────
+  getGameStats({ goalId }) {
+    return getGameStats(goalId);
+  },
+  upsertDailyXp({ goalId, date }) {
+    return upsertDailyXp(goalId, date);
+  },
+  recalcStreakAndHealth({ goalId }) {
+    return recalcStreakAndHealth(goalId);
+  },
+  calculateGoalStatus({ goalId }) {
+    return calculateAndStoreGoalStatus(goalId);
+  },
+  calculateBuildPhase({ goalId }) {
+    return calculateAndStoreBuildPhase(goalId);
+  },
+  calculateDifficultyPhase({ goalId }) {
+    return calculateAndStoreDifficultyPhase(goalId);
+  },
+  maybeUpgradeDifficultyPhase({ goalId }) {
+    return maybeUpgradeDifficultyPhaseForGoal(goalId);
+  },
 };
+
+// ── Gamification helpers ────────────────────────────────────────────────────
+
+const TIER_XP = { 1: 5, 2: 15, 3: 40, 4: 100, 5: 300 };
+const MS_PER_DAY = 86_400_000;
+
+function normalizeDifficultyPhase(value) {
+  return value === 2 || value === 3 || value === 4 ? value : 1;
+}
+
+function getDailyRequirement(goal = {}) {
+  const phase = normalizeDifficultyPhase(goal.difficultyPhase ?? goal.difficulty_phase);
+  if (phase === 4) {
+    return {
+      phase,
+      phaseName: 'Operator Mode',
+      tasksRequired: 3,
+      minimumTier: null,
+      weeklyHardTaskRequired: true,
+      missPenalty: 15,
+      minimumCopy: 'Minimum required: 3 tasks.',
+    };
+  }
+  if (phase === 3) {
+    return {
+      phase,
+      phaseName: 'Real Work',
+      tasksRequired: 3,
+      minimumTier: 2,
+      weeklyHardTaskRequired: false,
+      missPenalty: 10,
+      minimumCopy: 'Minimum required: 3 tasks, with at least 1 T2+.',
+    };
+  }
+  if (phase === 2) {
+    return {
+      phase,
+      phaseName: 'Build Rhythm',
+      tasksRequired: 2,
+      minimumTier: null,
+      weeklyHardTaskRequired: false,
+      missPenalty: 5,
+      minimumCopy: 'Minimum required: 2 tasks.',
+    };
+  }
+  return {
+    phase,
+    phaseName: 'Show Up',
+    tasksRequired: 1,
+    minimumTier: null,
+    weeklyHardTaskRequired: false,
+    missPenalty: 2,
+    minimumCopy: 'Minimum required: 1 task.',
+  };
+}
+
+function isValidDay(goal, tasks) {
+  const requirement = getDailyRequirement(goal);
+  const completed = tasks.filter((task) => task.status === 'done');
+  if (completed.length < requirement.tasksRequired) return false;
+  if (requirement.minimumTier) {
+    return completed.some((task) => (task.tier ?? 1) >= requirement.minimumTier);
+  }
+  return true;
+}
+
+function applyMissedDayPenalty(goal) {
+  const requirement = getDailyRequirement(goal);
+  const currentHealth = goal.buildHealth ?? goal.build_health ?? goal.healthScore ?? goal.health_score ?? 100;
+  const nextHealth = Math.max(0, currentHealth - requirement.missPenalty);
+  const currentStatus = goal.performanceStatus ?? goal.performance_status ?? 'on_track';
+  const shouldDecay =
+    requirement.phase === 4 ||
+    (requirement.phase === 3 && (currentStatus === 'decaying' || currentHealth <= 90));
+  return {
+    ...goal,
+    buildHealth: nextHealth,
+    healthScore: nextHealth,
+    performanceStatus: shouldDecay ? 'decaying' : currentStatus,
+  };
+}
+
+function maybeUpgradeDifficultyPhase(goal, inspections = []) {
+  const currentPhase = normalizeDifficultyPhase(goal.difficultyPhase ?? goal.difficulty_phase);
+  const latestTwo = inspections.slice(0, 2);
+  const passedTwoInARow = latestTwo.length === 2 && latestTwo.every((row) => row.result === 'pass');
+  if (!passedTwoInARow || currentPhase >= 4) return goal;
+  return {
+    ...goal,
+    difficultyPhase: currentPhase + 1,
+  };
+}
+
+function computeTargetXp(goalCreatedAtMs, targetDateStr) {
+  const now = Date.now();
+  const end = targetDateStr ? new Date(targetDateStr).getTime() : now + 90 * MS_PER_DAY;
+  const totalDays = Math.max(1, Math.round((end - goalCreatedAtMs) / MS_PER_DAY));
+  const workingDays = Math.round((totalDays / 7) * 5);
+  return Math.max(1, workingDays * TIER_XP[2]);
+}
+
+function computeBuildStage(totalXp, targetXp) {
+  if (targetXp <= 0) return 1;
+  const ratio = totalXp / targetXp;
+  if (ratio >= 0.8) return 5;
+  if (ratio >= 0.6) return 4;
+  if (ratio >= 0.4) return 3;
+  if (ratio >= 0.2) return 2;
+  return 1;
+}
+
+function computeDifficultyPhase(goalCreatedAtMs, asOfMs = Date.now()) {
+  const weeksElapsed = Math.floor((asOfMs - goalCreatedAtMs) / (7 * MS_PER_DAY));
+  if (weeksElapsed >= 6) return 4;
+  if (weeksElapsed >= 4) return 3;
+  if (weeksElapsed >= 2) return 2;
+  return 1;
+}
+
+function computeGoalStatus({ xpTotal, xpTarget, buildHealth, lastCompletedDate, createdAt, asOfMs = Date.now() }) {
+  const daysSinceCompletion = lastCompletedDate
+    ? Math.floor((asOfMs - new Date(lastCompletedDate).getTime()) / MS_PER_DAY)
+    : null;
+  if (buildHealth < 40 || (daysSinceCompletion !== null && daysSinceCompletion >= 7)) return 'decaying';
+  const ratio = xpTarget > 0 ? xpTotal / xpTarget : 1;
+  const daysSinceCreated = createdAt ? Math.floor((asOfMs - createdAt) / MS_PER_DAY) : 0;
+  if (ratio >= 1.1) return 'ahead';
+  if (daysSinceCreated >= 7 && ratio < 0.75) return 'behind';
+  return 'on_track';
+}
+
+function calculateAndStoreBuildPhase(goalId) {
+  const goal = db.prepare('SELECT created_at, target_date, total_xp, xp_target FROM goals WHERE id = ?').get(goalId);
+  if (!goal) return 1;
+  const targetXp = goal.xp_target > 0 ? goal.xp_target : computeTargetXp(goal.created_at, goal.target_date);
+  const phase = computeBuildStage(goal.total_xp ?? 0, targetXp);
+  db.prepare('UPDATE goals SET current_phase = ?, updated_at = ? WHERE id = ?').run(phase, Date.now(), goalId);
+  return phase;
+}
+
+function calculateAndStoreDifficultyPhase(goalId) {
+  const goal = db.prepare('SELECT difficulty_phase FROM goals WHERE id = ?').get(goalId);
+  if (!goal) return 1;
+  return normalizeDifficultyPhase(goal.difficulty_phase);
+}
+
+function calculateAndStoreGoalStatus(goalId) {
+  const goal = db.prepare(
+    'SELECT created_at, target_date, total_xp, xp_target, health_score, build_health, last_completed_date FROM goals WHERE id = ?'
+  ).get(goalId);
+  if (!goal) return 'on_track';
+  const targetXp = goal.xp_target > 0 ? goal.xp_target : computeTargetXp(goal.created_at, goal.target_date);
+  const status = computeGoalStatus({
+    xpTotal: goal.total_xp ?? 0,
+    xpTarget: targetXp,
+    buildHealth: goal.build_health ?? goal.health_score ?? 100,
+    lastCompletedDate: goal.last_completed_date,
+    createdAt: goal.created_at,
+  });
+  db.prepare('UPDATE goals SET performance_status = ?, updated_at = ? WHERE id = ?').run(status, Date.now(), goalId);
+  return status;
+}
+
+function getGameStats(goalId) {
+  const goal = db.prepare(
+    'SELECT created_at, target_date, total_xp, current_streak, health_score, xp_target, difficulty_phase, performance_status FROM goals WHERE id = ?'
+  ).get(goalId);
+  if (!goal) return null;
+
+  const targetXp = goal.xp_target > 0 ? goal.xp_target : computeTargetXp(goal.created_at, goal.target_date);
+  const buildStage = computeBuildStage(goal.total_xp ?? 0, targetXp);
+  const dailyRequirement = getDailyRequirement(goal);
+
+  const rows = db.prepare(
+    'SELECT id, goal_id, date, xp_earned, expectation, met FROM daily_xp WHERE goal_id = ? ORDER BY date DESC LIMIT 7'
+  ).all(goalId);
+
+  return {
+    totalXp: goal.total_xp ?? 0,
+    currentStreak: goal.current_streak ?? 0,
+    healthScore: goal.health_score ?? 100,
+    targetXp,
+    buildStage,
+    dailyExpectation: dailyRequirement.tasksRequired,
+    difficultyPhase: dailyRequirement.phase,
+    dailyRequirement,
+    statusCopy: getStatusCopy(dailyRequirement, goal.performance_status ?? 'on_track'),
+    last7Days: rows.map((r) => ({
+      id: r.id,
+      goalId: r.goal_id,
+      date: r.date,
+      xpEarned: r.xp_earned,
+      expectation: r.expectation,
+      met: r.met === 1,
+    })),
+  };
+}
+
+function getStatusCopy(requirement, status) {
+  if (status === 'decaying' && requirement.phase === 4) {
+    return 'Missed target. Recovery task assigned.';
+  }
+  if (requirement.phase === 4) {
+    return 'Operator Mode unlocked. Expectations increased.';
+  }
+  return requirement.minimumCopy;
+}
+
+function upsertDailyXp(goalId, date) {
+  const goal = db.prepare('SELECT created_at, total_xp, difficulty_phase FROM goals WHERE id = ?').get(goalId);
+  if (!goal) return null;
+
+  const completedTasks = db.prepare(
+    "SELECT status, tier FROM daily_tasks WHERE goal_id = ? AND date = ? AND status = 'done'"
+  ).all(goalId, date);
+
+  const tierCase = Object.entries(TIER_XP)
+    .map(([t, xp]) => `WHEN tier = ${t} THEN ${xp}`)
+    .join(' ');
+  const xpResult = db.prepare(
+    `SELECT COALESCE(SUM(CASE ${tierCase} ELSE 15 END), 0) AS xp
+     FROM daily_tasks WHERE goal_id = ? AND date = ? AND status = 'done'`
+  ).get(goalId, date);
+  const xpEarned = xpResult?.xp ?? 0;
+
+  const requirement = getDailyRequirement(goal);
+  const expectation = requirement.tasksRequired;
+  const met = isValidDay(goal, completedTasks) ? 1 : 0;
+
+  const existing = db.prepare('SELECT id, xp_earned FROM daily_xp WHERE goal_id = ? AND date = ?').get(goalId, date);
+
+  if (existing) {
+    db.prepare('UPDATE daily_xp SET xp_earned = ?, expectation = ?, met = ? WHERE id = ?').run(xpEarned, expectation, met, existing.id);
+    const delta = xpEarned - existing.xp_earned;
+    if (delta !== 0) {
+      db.prepare('UPDATE goals SET total_xp = MAX(0, COALESCE(total_xp,0) + ?), updated_at = ? WHERE id = ?').run(delta, Date.now(), goalId);
+    }
+    if (met !== 1) applyMissedDayPenaltyForGoal(goalId, date);
+    return { id: existing.id, goalId, date, xpEarned, expectation, met: met === 1 };
+  }
+
+  const id = generateId();
+  db.prepare('INSERT INTO daily_xp (id, goal_id, date, xp_earned, expectation, met) VALUES (?, ?, ?, ?, ?, ?)').run(id, goalId, date, xpEarned, expectation, met);
+  db.prepare('UPDATE goals SET total_xp = MAX(0, COALESCE(total_xp,0) + ?), updated_at = ? WHERE id = ?').run(xpEarned, Date.now(), goalId);
+  if (met !== 1) applyMissedDayPenaltyForGoal(goalId, date);
+  return { id, goalId, date, xpEarned, expectation, met: met === 1 };
+}
+
+function applyMissedDayPenaltyForGoal(goalId, missedDate) {
+  const goal = db.prepare(
+    'SELECT build_health, health_score, performance_status, difficulty_phase FROM goals WHERE id = ?'
+  ).get(goalId);
+  if (!goal) return;
+  const nextGoal = applyMissedDayPenalty(goal);
+  db.prepare(
+    'UPDATE goals SET build_health = ?, health_score = ?, performance_status = ?, updated_at = ? WHERE id = ?'
+  ).run(nextGoal.buildHealth, nextGoal.healthScore, nextGoal.performanceStatus, Date.now(), goalId);
+
+  if (normalizeDifficultyPhase(goal.difficulty_phase) !== 4) return;
+
+  const recoveryDate = missedDate < todayString() ? todayString() : missedDate;
+  const existing = db.prepare(
+    "SELECT id FROM daily_tasks WHERE goal_id = ? AND date = ? AND is_recovery_task = 1 AND status != 'dropped' LIMIT 1"
+  ).get(goalId, recoveryDate);
+  const taskCount = db.prepare(
+    "SELECT COUNT(*) AS count FROM daily_tasks WHERE date = ? AND status != 'dropped'"
+  ).get(recoveryDate)?.count ?? 0;
+
+  if (existing || taskCount >= DAILY_TASK_CAP) return;
+
+  const now = Date.now();
+  db.prepare(
+    `INSERT INTO daily_tasks (
+      id, goal_id, title, next_step, date, status, completed_at, sort_order, created_at,
+      task_type, effort_level, phase_id, focus_duration_minutes, break_duration_minutes,
+      tier, is_recovery_task, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    generateId(),
+    goalId,
+    'Recovery task: reset the build',
+    'Do one small task to restart momentum.',
+    recoveryDate,
+    'pending',
+    null,
+    taskCount,
+    now,
+    'goal',
+    'light',
+    'phase2',
+    25,
+    5,
+    1,
+    1,
+    now
+  );
+}
+
+function maybeUpgradeDifficultyPhaseForGoal(goalId) {
+  const goal = db.prepare('SELECT difficulty_phase FROM goals WHERE id = ?').get(goalId);
+  if (!goal) return 1;
+  const inspections = db.prepare(
+    'SELECT result FROM weekly_inspections WHERE goal_id = ? ORDER BY week_start DESC LIMIT 2'
+  ).all(goalId);
+  const nextGoal = maybeUpgradeDifficultyPhase(
+    { difficultyPhase: normalizeDifficultyPhase(goal.difficulty_phase) },
+    inspections
+  );
+  if (nextGoal.difficultyPhase !== normalizeDifficultyPhase(goal.difficulty_phase)) {
+    db.prepare('UPDATE goals SET difficulty_phase = ?, updated_at = ? WHERE id = ?').run(
+      nextGoal.difficultyPhase,
+      Date.now(),
+      goalId
+    );
+  }
+  return nextGoal.difficultyPhase;
+}
+
+function recalcStreakAndHealth(goalId) {
+  const goal = db.prepare('SELECT difficulty_phase FROM goals WHERE id = ?').get(goalId);
+  const requirement = getDailyRequirement(goal ?? {});
+  const rows = db.prepare(
+    'SELECT date, met FROM daily_xp WHERE goal_id = ? ORDER BY date DESC LIMIT 60'
+  ).all(goalId);
+
+  if (rows.length === 0) {
+    db.prepare('UPDATE goals SET current_streak = 0, streak_date = ?, health_score = 100, build_health = 100, updated_at = ? WHERE id = ?').run(
+      new Date().toISOString().slice(0, 10), Date.now(), goalId
+    );
+    return true;
+  }
+
+  let streak = 0;
+  let prevDate = null;
+  for (const row of rows) {
+    if (row.met !== 1) break;
+    if (prevDate !== null) {
+      const diff = (new Date(prevDate).getTime() - new Date(row.date).getTime()) / MS_PER_DAY;
+      if (diff > 1) break;
+    }
+    streak++;
+    prevDate = row.date;
+  }
+
+  let health = 100;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    health = rows[i].met === 1 ? Math.min(100, health + 2) : Math.max(0, health - requirement.missPenalty);
+  }
+
+  const repeatedPhase3Miss = requirement.phase === 3 && rows[0]?.met === 0 && rows[1]?.met === 0;
+  const performanceStatus =
+    (requirement.phase === 4 && rows[0]?.met === 0) || repeatedPhase3Miss
+      ? 'decaying'
+      : computeGoalStatus({
+          xpTotal: 0,
+          xpTarget: 1,
+          buildHealth: health,
+          lastCompletedDate: streak > 0 ? rows[0].date : '',
+        });
+
+  db.prepare('UPDATE goals SET current_streak = ?, streak_date = ?, health_score = ?, build_health = ?, last_completed_date = ?, performance_status = ?, updated_at = ? WHERE id = ?').run(
+    streak, rows[0].date, health, health, streak > 0 ? rows[0].date : '', performanceStatus, Date.now(), goalId
+  );
+  calculateAndStoreBuildPhase(goalId);
+  maybeUpgradeDifficultyPhaseForGoal(goalId);
+  return true;
+}
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -456,16 +907,25 @@ function normalizeGoalInput(input = {}) {
     costOfDrift,
     anchorWhy,
     anchorDrift,
+    description: cleanText(input.description),
+    startDate: cleanText(input.startDate) || null,
+    whyItMatters: cleanText(input.whyItMatters) || anchorWhy,
+    xpTarget: Number.isFinite(Number(input.xpTarget)) ? Number(input.xpTarget) : 0,
   };
 }
 
 function mapGoal(row) {
   if (!row) return null;
+  const totalXp = row.total_xp ?? 0;
+  const currentStreak = row.current_streak ?? 0;
+  const healthScore = row.health_score ?? 100;
+  const targetDate = row.target_date ?? row.end_date ?? null;
   return {
     id: row.id,
+    name: row.title,
     title: row.title,
     targetOutcome: row.target_outcome || row.title,
-    targetDate: row.target_date,
+    targetDate,
     metric: row.metric || '',
     why: row.anchor_why || row.why,
     practicalReason: row.practical_reason || '',
@@ -478,10 +938,28 @@ function mapGoal(row) {
     payoff: 0,
     whyNow: '',
     createdAt: row.created_at,
+    updatedAt: row.updated_at ?? row.created_at,
     status: row.status,
     currentFrictionMinutes: row.current_friction_minutes ?? 2,
     weeklySeatedSeconds: row.weekly_seated_seconds ?? 0,
     weeklySeatedWeekOf: row.weekly_seated_week_of ?? '',
+    totalXp,
+    currentStreak,
+    streakDate: row.streak_date ?? '',
+    healthScore,
+    visionId: row.vision_id ?? null,
+    description: row.description ?? '',
+    startDate: row.start_date ?? null,
+    endDate: row.end_date ?? targetDate,
+    whyItMatters: row.why_it_matters || row.anchor_why || row.why,
+    xpTotal: totalXp,
+    xpTarget: row.xp_target ?? 0,
+    buildHealth: row.build_health ?? healthScore,
+    currentPhase: row.current_phase ?? 1,
+    difficultyPhase: row.difficulty_phase ?? 1,
+    streakCount: currentStreak,
+    lastCompletedDate: row.last_completed_date ?? '',
+    performanceStatus: row.performance_status ?? 'on_track',
   };
 }
 
@@ -495,18 +973,22 @@ function getActiveGoal() {
 function createGoal(input) {
   const normalized = normalizeGoalInput(input);
   db.prepare("UPDATE goals SET status = 'archived' WHERE status = 'active'").run();
+  const now = Date.now();
   const goal = {
     id: generateId(),
     ...normalized,
-    createdAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
     status: 'active',
   };
   db.prepare(
     `INSERT INTO goals (
       id, title, target_outcome, target_date, metric, why,
       practical_reason, emotional_reason, cost_of_drift,
-      anchor_why, anchor_drift, created_at, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      anchor_why, anchor_drift, created_at, status, description,
+      start_date, end_date, why_it_matters, xp_target, build_health,
+      current_phase, difficulty_phase, last_completed_date, performance_status, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     goal.id,
     goal.title,
@@ -520,9 +1002,35 @@ function createGoal(input) {
     goal.anchorWhy,
     goal.anchorDrift,
     goal.createdAt,
-    goal.status
+    goal.status,
+    goal.description,
+    goal.startDate || todayString(),
+    goal.targetDate,
+    goal.whyItMatters,
+    goal.xpTarget,
+    100,
+    1,
+    1,
+    '',
+    'on_track',
+    goal.updatedAt
   );
   return getActiveGoal();
+}
+
+function createDefaultGoal() {
+  return createGoal({
+    title: 'Build momentum',
+    targetOutcome: 'Create a steady weekly goal rhythm',
+    metric: 'XP earned',
+    why: 'A simple default goal keeps tasks anchored until a specific goal is chosen.',
+    practicalReason: 'Keep daily tasks grouped.',
+    emotionalReason: 'Make progress visible.',
+    costOfDrift: 'Tasks drift without an anchor.',
+    description: 'Default goal project',
+    startDate: todayString(),
+    whyItMatters: 'A small visible build is easier to return to.',
+  });
 }
 
 function updateGoal(id, input) {
@@ -531,7 +1039,8 @@ function updateGoal(id, input) {
     `UPDATE goals
      SET title = ?, target_outcome = ?, target_date = ?, metric = ?, why = ?,
          practical_reason = ?, emotional_reason = ?, cost_of_drift = ?,
-         anchor_why = ?, anchor_drift = ?
+        anchor_why = ?, anchor_drift = ?, description = ?, start_date = ?,
+        end_date = ?, why_it_matters = ?, xp_target = ?, updated_at = ?
      WHERE id = ?`
   ).run(
     normalized.title,
@@ -544,6 +1053,12 @@ function updateGoal(id, input) {
     normalized.costOfDrift,
     normalized.anchorWhy,
     normalized.anchorDrift,
+    normalized.description,
+    normalized.startDate,
+    normalized.targetDate,
+    normalized.whyItMatters,
+    normalized.xpTarget,
+    Date.now(),
     id
   );
   return true;
@@ -594,6 +1109,11 @@ function upsertWeeklyFocus(goalId, focus) {
   return mapWeeklyFocus(next);
 }
 
+function normalizeTier(value) {
+  if (value === 1 || value === 2 || value === 3 || value === 4 || value === 5) return value;
+  return 2;
+}
+
 function mapTask(row) {
   if (!row) return null;
   const taskType = row.task_type || 'goal';
@@ -611,6 +1131,7 @@ function mapTask(row) {
     completedAt: row.completed_at,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
+    updatedAt: row.updated_at ?? row.completed_at ?? row.created_at,
     taskType,
     effortLevel,
     milestoneId: row.milestone_id ?? null,
@@ -624,33 +1145,27 @@ function mapTask(row) {
       row.break_duration_minutes,
       getPlannerDefault('daily_rhythm_break_minutes', DEFAULT_BREAK_MINUTES, clampBreakMinutes)
     ),
+    tier: normalizeTier(row.tier),
+    linkedSite: row.linked_site ?? null,
+    isRecoveryTask: row.is_recovery_task === 1,
   };
 }
 
+const TASK_COLUMNS = `id, goal_id, weekly_focus_id, source_task_id, title, next_step, date, status,
+  completed_at, sort_order, created_at, project_id, task_type, effort_level,
+  milestone_id, scheduled_window_start, phase_id, focus_duration_minutes,
+  break_duration_minutes, tier, linked_site, is_recovery_task, updated_at`;
+
 function getTasksForDate(date) {
   return db
-    .prepare(
-      `SELECT id, goal_id, weekly_focus_id, source_task_id, title, next_step, date, status,
-              completed_at, sort_order, created_at, project_id, task_type, effort_level,
-              milestone_id, scheduled_window_start, phase_id, focus_duration_minutes,
-              break_duration_minutes
-       FROM daily_tasks
-       WHERE date = ? AND status != 'dropped'
-       ORDER BY sort_order`
-    )
+    .prepare(`SELECT ${TASK_COLUMNS} FROM daily_tasks WHERE date = ? AND status != 'dropped' ORDER BY sort_order`)
     .all(date)
     .map(mapTask);
 }
 
 function getTaskById(id) {
   return mapTask(
-    db.prepare(
-      `SELECT id, goal_id, weekly_focus_id, source_task_id, title, next_step, date, status,
-              completed_at, sort_order, created_at, project_id, task_type, effort_level,
-              milestone_id, scheduled_window_start, phase_id, focus_duration_minutes,
-              break_duration_minutes
-       FROM daily_tasks WHERE id = ?`
-    ).get(id)
+    db.prepare(`SELECT ${TASK_COLUMNS} FROM daily_tasks WHERE id = ?`).get(id)
   );
 }
 
@@ -683,6 +1198,7 @@ function createTask(title, goalId, weeklyFocusId = null, nextStep = '', options 
     DEFAULT_BREAK_MINUTES,
     clampBreakMinutes
   );
+  const now = Date.now();
   const task = {
     id: generateId(),
     goalId,
@@ -695,7 +1211,8 @@ function createTask(title, goalId, weeklyFocusId = null, nextStep = '', options 
     status: 'pending',
     completedAt: null,
     sortOrder: getTaskCountForDate(targetDate),
-    createdAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
     taskType,
     effortLevel,
     milestoneId: options.milestoneId ?? null,
@@ -703,14 +1220,18 @@ function createTask(title, goalId, weeklyFocusId = null, nextStep = '', options 
     phaseId: normalizePhaseId(options.phaseId, taskType, effortLevel),
     focusDurationMinutes: clampDurationMinutes(options.focusDurationMinutes, defaultFocusMinutes),
     breakDurationMinutes: clampBreakMinutes(options.breakDurationMinutes, defaultBreakMinutes),
+    tier: normalizeTier(options.tier),
+    linkedSite: options.linkedSite ?? null,
+    isRecoveryTask: options.isRecoveryTask === true,
   };
 
   db.prepare(
     `INSERT INTO daily_tasks (
       id, goal_id, project_id, weekly_focus_id, source_task_id, title, next_step,
       date, status, completed_at, sort_order, created_at, task_type, effort_level,
-      milestone_id, scheduled_window_start, phase_id, focus_duration_minutes, break_duration_minutes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      milestone_id, scheduled_window_start, phase_id, focus_duration_minutes, break_duration_minutes, tier,
+      linked_site, is_recovery_task, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     task.goalId,
@@ -730,7 +1251,11 @@ function createTask(title, goalId, weeklyFocusId = null, nextStep = '', options 
     task.scheduledWindowStart,
     task.phaseId,
     task.focusDurationMinutes,
-    task.breakDurationMinutes
+    task.breakDurationMinutes,
+    task.tier,
+    task.linkedSite,
+    task.isRecoveryTask ? 1 : 0,
+    task.updatedAt
   );
 
   refreshResumeContext();
@@ -742,7 +1267,7 @@ function carryForwardTask(taskId) {
     .prepare(
       `SELECT id, goal_id, weekly_focus_id, title, next_step
               , project_id, task_type, effort_level, milestone_id, scheduled_window_start
-              , phase_id, focus_duration_minutes, break_duration_minutes
+      , phase_id, focus_duration_minutes, break_duration_minutes, tier, linked_site, is_recovery_task
        FROM daily_tasks WHERE id = ? AND status = 'pending'`
     )
     .get(taskId);
@@ -769,6 +1294,9 @@ function carryForwardTask(taskId) {
       phaseId: source.phase_id,
       focusDurationMinutes: source.focus_duration_minutes,
       breakDurationMinutes: source.break_duration_minutes,
+      tier: source.tier,
+      linkedSite: source.linked_site,
+      isRecoveryTask: source.is_recovery_task === 1,
     }
   );
   refreshResumeContext();
@@ -776,19 +1304,32 @@ function carryForwardTask(taskId) {
 }
 
 function completeTask(id) {
-  db.prepare("UPDATE daily_tasks SET status = 'done', completed_at = ? WHERE id = ?").run(Date.now(), id);
+  const now = Date.now();
+  db.prepare("UPDATE daily_tasks SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ?").run(now, now, id);
   refreshResumeContext();
+
+  // Fire-and-forget XP update
+  const task = db.prepare('SELECT goal_id, date FROM daily_tasks WHERE id = ?').get(id);
+  if (task) {
+    try {
+      upsertDailyXp(task.goal_id, task.date);
+      recalcStreakAndHealth(task.goal_id);
+    } catch (_) {
+      // non-critical
+    }
+  }
+
   return true;
 }
 
 function uncompleteTask(id) {
-  db.prepare("UPDATE daily_tasks SET status = 'pending', completed_at = NULL WHERE id = ?").run(id);
+  db.prepare("UPDATE daily_tasks SET status = 'pending', completed_at = NULL, updated_at = ? WHERE id = ?").run(Date.now(), id);
   refreshResumeContext();
   return true;
 }
 
 function dropTask(id) {
-  db.prepare("UPDATE daily_tasks SET status = 'dropped' WHERE id = ?").run(id);
+  db.prepare("UPDATE daily_tasks SET status = 'dropped', updated_at = ? WHERE id = ?").run(Date.now(), id);
   refreshResumeContext();
   return true;
 }

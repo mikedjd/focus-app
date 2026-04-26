@@ -1,5 +1,9 @@
 export type GoalStatus = 'active' | 'queued' | 'parked' | 'completed';
+export type GoalPerformanceStatus = 'ahead' | 'on_track' | 'behind' | 'decaying';
+export type WeeklyInspectionResult = 'pass' | 'fail' | 'partial';
 export type TaskStatus = 'pending' | 'done' | 'dropped';
+export type TaskTierLabel = 'T1' | 'T2' | 'T3' | 'T4' | 'T5';
+export type DifficultyPhase = 1 | 2 | 3 | 4;
 export type TaskType = 'goal' | 'admin';
 export type EffortLevel = '' | 'light' | 'medium' | 'challenging';
 export type EnergyIntensity = 'low' | 'medium' | 'high';
@@ -44,10 +48,15 @@ export interface GoalWriteInput {
   payoff?: number;
   whyNow?: string;
   visionId?: string | null;
+  description?: string;
+  startDate?: string | null;
+  whyItMatters?: string;
+  xpTarget?: number;
 }
 
 export interface Goal {
   id: string;
+  name: string;
   title: string;
   targetOutcome: string;
   targetDate: string | null;
@@ -63,11 +72,48 @@ export interface Goal {
   payoff: number;
   whyNow: string;
   createdAt: number;
+  updatedAt: number;
   status: GoalStatus;
   currentFrictionMinutes: number;
   weeklySeatedSeconds: number;
   weeklySeatedWeekOf: string;
   visionId: string | null;
+  totalXp: number;
+  currentStreak: number;
+  streakDate: string;
+  healthScore: number;
+  // GoalProject fields
+  description: string;
+  startDate: string | null;
+  endDate: string | null;
+  whyItMatters: string;
+  xpTotal: number;
+  xpTarget: number;
+  buildHealth: number;
+  currentPhase: number;
+  difficultyPhase: number;
+  streakCount: number;
+  lastCompletedDate: string;
+  performanceStatus: GoalPerformanceStatus;
+}
+
+export interface GoalProject {
+  id: string;
+  name: string;
+  description: string;
+  startDate: string | null;
+  endDate: string | null;
+  whyItMatters: string;
+  xpTotal: number;
+  xpTarget: number;
+  buildHealth: number;
+  currentPhase: number;
+  difficultyPhase: number;
+  streakCount: number;
+  lastCompletedDate: string;
+  status: GoalPerformanceStatus;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface Milestone {
@@ -209,6 +255,48 @@ export interface DailyReview {
   tomorrowStep: string;
 }
 
+export type TaskTier = 1 | 2 | 3 | 4 | 5;
+export const TIER_XP: Record<TaskTier, number> = { 1: 5, 2: 15, 3: 40, 4: 100, 5: 300 };
+export const TIER_LABEL_XP: Record<TaskTierLabel, number> = {
+  T1: 5,
+  T2: 15,
+  T3: 40,
+  T4: 100,
+  T5: 300,
+};
+
+export interface DailyXpRow {
+  id: string;
+  goalId: string;
+  date: string; // YYYY-MM-DD
+  xpEarned: number;
+  expectation: number;
+  met: boolean;
+}
+
+export interface GameStats {
+  totalXp: number;
+  currentStreak: number;
+  healthScore: number; // 0–100
+  targetXp: number;   // daily_expectation × working_days_to_target_date
+  buildStage: 1 | 2 | 3 | 4 | 5;
+  dailyExpectation: number; // kept for compatibility; mirrors dailyRequirement.tasksRequired
+  difficultyPhase: DifficultyPhase;
+  dailyRequirement: DailyRequirement;
+  statusCopy: string;
+  last7Days: DailyXpRow[];
+}
+
+export interface DailyRequirement {
+  phase: DifficultyPhase;
+  phaseName: 'Show Up' | 'Build Rhythm' | 'Real Work' | 'Operator Mode';
+  tasksRequired: number;
+  minimumTier: TaskTier | null;
+  weeklyHardTaskRequired: boolean;
+  missPenalty: number;
+  minimumCopy: string;
+}
+
 export interface DailyTask {
   id: string;
   goalId: string;
@@ -222,6 +310,7 @@ export interface DailyTask {
   completedAt: number | null;
   sortOrder: number;
   createdAt: number;
+  updatedAt: number;
   taskType: TaskType;
   effortLevel: EffortLevel;
   milestoneId: string | null;
@@ -229,6 +318,9 @@ export interface DailyTask {
   phaseId: DailyPhaseId;
   focusDurationMinutes: number;
   breakDurationMinutes: number;
+  tier: TaskTier;
+  linkedSite: string | null;
+  isRecoveryTask: boolean;
 }
 
 export interface FocusSession {
@@ -315,6 +407,7 @@ export interface TaskPlanInput {
   phaseId: DailyPhaseId;
   focusDurationMinutes: number;
   breakDurationMinutes: number;
+  tier?: TaskTier;
 }
 
 export type TaskWriteFailureReason =
@@ -326,3 +419,16 @@ export type TaskWriteFailureReason =
 export type TaskWriteResult =
   | { ok: true; task: DailyTask }
   | { ok: false; reason: TaskWriteFailureReason };
+
+export interface WeeklyInspection {
+  id: string;
+  goalId: string;
+  weekStart: string; // YYYY-MM-DD (Monday)
+  weekEnd: string;   // YYYY-MM-DD (Sunday)
+  xpEarned: number;
+  tasksCompleted: number;
+  hardTasksCompleted: number; // tier >= 3
+  result: WeeklyInspectionResult;
+  recoveryTaskCreated: boolean;
+  createdAt: number;
+}
