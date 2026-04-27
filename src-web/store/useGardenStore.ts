@@ -40,6 +40,8 @@ interface GardenState {
   goalProgress: GoalProgress;
   resumeState: ResumeState | null;
   habits: Habit[];
+  userName: string;
+  setUserName: (name: string) => void;
   updateGoal: (input: GoalInput) => void;
   addTask: (input: TaskInput) => void;
   addHabit: (input: HabitInput) => void;
@@ -119,6 +121,8 @@ export const useGardenStore = create<GardenState>()(
   goalProgress: initialGoalProgress,
   resumeState: seedResumeState,
   habits: seedHabits,
+  userName: '',
+  setUserName: (name) => set({ userName: name }),
   updateGoal: (input) => {
     const today = new Date();
     const startedAt = today.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -391,6 +395,7 @@ export const useGardenStore = create<GardenState>()(
     habits: state.habits,
     goalProgress: state.goalProgress,
     resumeState: state.resumeState,
+    userName: state.userName,
   }),
   version: 1,
 }));

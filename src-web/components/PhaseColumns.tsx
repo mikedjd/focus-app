@@ -49,7 +49,7 @@ export function PhaseColumns() {
                   </span>
                   {task.status === 'tending' ? (
                     <span className="rounded-full bg-sienna px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.12em] text-paper">
-                      active
+                      tending
                     </span>
                   ) : null}
                 </button>

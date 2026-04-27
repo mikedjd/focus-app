@@ -2,14 +2,15 @@ import type { FrictionHistory } from '../types';
 
 interface FrictionChartProps {
   history: FrictionHistory;
+  startedAt?: string;
 }
 
-export function FrictionChart({ history }: FrictionChartProps) {
+export function FrictionChart({ history, startedAt }: FrictionChartProps) {
   if (history.length < 2) {
     return (
       <section className="rounded-[20px] border border-rule bg-paper p-7">
         <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-leaf">
-          ✦ Friction baseline
+          ✦ Friction floor
         </p>
         <div className="mt-4 rounded-2xl border border-dashed border-rule bg-bg p-8">
           <p className="font-display text-[28px] italic text-ink">No baseline yet.</p>
@@ -40,7 +41,7 @@ export function FrictionChart({ history }: FrictionChartProps) {
       <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-leaf">
-            ✦ Friction baseline
+            ✦ Friction floor
           </p>
           <div className="mt-2 flex items-baseline gap-4">
             <span className="font-display text-[64px] leading-none text-sienna">{history.at(-1)}</span>
@@ -49,10 +50,10 @@ export function FrictionChart({ history }: FrictionChartProps) {
         </div>
         <div className="max-w-md text-right">
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-            21 entries · focus baseline
+            {history.length} {history.length === 1 ? 'day' : 'days'}{startedAt ? ` · started ${startedAt}` : ''}
           </p>
           <p className="mt-2 font-display text-[17px] italic text-ink-soft">
-            Started at 18 minutes. Today the structure is visible.
+            Started at {history[0]} min. {history.at(-1)! > history[0] ? 'The floor is rising — keep the climb going.' : 'Keep showing up. The structure compounds.'}
           </p>
         </div>
       </div>

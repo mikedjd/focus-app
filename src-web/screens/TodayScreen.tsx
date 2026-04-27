@@ -106,7 +106,13 @@ export function TodayScreen() {
   const tasks = useGardenStore((state) => state.tasks);
   const currentTaskId = useGardenStore((state) => state.currentTaskId);
   const goal = useGardenStore((state) => state.goal);
+  const userName = useGardenStore((state) => state.userName);
   const currentTask = tasks.find((task) => task.id === currentTaskId) ?? tasks[0] ?? null;
+
+  const pendingCount = tasks.filter((t) => t.status !== 'done').length;
+  const subText = goal.title
+    ? `One load-bearing task today — the rest can wait. The blueprint holds.`
+    : 'The board is clear. Put one piece on it.';
 
   return (
     <div className="mx-auto max-w-garden">
@@ -116,10 +122,10 @@ export function TodayScreen() {
         <section>
           <PhasePills />
           <h1 className="font-display text-[64px] leading-none tracking-[-0.02em] text-ink lg:text-[72px]">
-            Good morning.
+            Good morning{userName ? `, ${userName}` : ''}.
           </h1>
           <p className="mt-4 max-w-[580px] font-display text-[22px] italic leading-8 text-ink-soft">
-            The board is clear. One load-bearing task today. The rest can wait.
+            {pendingCount > 0 ? subText : 'The board is clear. Put one piece on it.'}
           </p>
         </section>
 

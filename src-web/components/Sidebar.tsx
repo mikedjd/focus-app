@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useGardenStore } from '../store/useGardenStore';
 
@@ -6,8 +7,13 @@ export function Sidebar() {
   const tasks = useGardenStore((state) => state.tasks);
   const brainDumpItems = useGardenStore((state) => state.brainDumpItems);
   const habits = useGardenStore((state) => state.habits);
+  const userName = useGardenStore((state) => state.userName);
+  const setUserName = useGardenStore((state) => state.setUserName);
   const resetAppData = useGardenStore((state) => state.resetAppData);
   const visibleBrainDumpCount = brainDumpItems.filter((item) => item.status === 'pile').length;
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   const navItems = [
     { to: '/', label: 'Board', note: String(tasks.filter((task) => task.status !== 'done').length) },
@@ -24,6 +30,39 @@ export function Sidebar() {
         <div className="mb-10">
           <div className="font-display text-4xl leading-none text-sienna">Architect</div>
           <div className="mt-1 font-display text-[12px] italic text-ink-soft">design the life you're building</div>
+          <div className="mt-3">
+            {editingName ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setUserName(nameDraft.trim());
+                  setEditingName(false);
+                }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  ref={nameInputRef}
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  autoFocus
+                  placeholder="Your name"
+                  className="w-full rounded-full border border-rule bg-bg px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-ink outline-none focus:border-sienna"
+                  onBlur={() => {
+                    setUserName(nameDraft.trim());
+                    setEditingName(false);
+                  }}
+                />
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setNameDraft(userName); setEditingName(true); }}
+                className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted hover:text-sienna transition"
+              >
+                {userName ? `hi, ${userName} ↗` : '+ set your name'}
+              </button>
+            )}
+          </div>
         </div>
 
         <nav className="flex flex-col gap-2">

@@ -176,7 +176,7 @@ export function GoalScreen() {
       </div>
 
       <div className="mt-7">
-        <FrictionChart history={frictionHistory} />
+        <FrictionChart history={frictionHistory} startedAt={goal.startedAt} />
       </div>
     </div>
   );
