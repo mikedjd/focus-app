@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import type { DailyPhaseId, Project, TaskPlanInput, TaskWriteResult } from '../../types';
+import type { DailyPhaseId, Project, TaskPlanInput, TaskTier, TaskWriteResult } from '../../types';
+import { TIER_XP } from '../../types';
 import { C } from '../../constants/colors';
 import { BottomSheetModal } from '../BottomSheetModal';
 import { useDailyRhythmSettings } from '../../hooks/useDailyRhythmSettings';
@@ -37,6 +38,7 @@ export function AddTaskSheet({
   const [phaseId, setPhaseId] = useState<DailyPhaseId>(initialPhaseId);
   const [focusMinutes, setFocusMinutes] = useState(String(defaultFocusMinutes));
   const [breakMinutes, setBreakMinutes] = useState(String(defaultBreakMinutes));
+  const [tier, setTier] = useState<TaskTier>(2);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -47,6 +49,7 @@ export function AddTaskSheet({
       setPhaseId(initialPhaseId);
       setFocusMinutes(String(defaultFocusMinutes));
       setBreakMinutes(String(defaultBreakMinutes));
+      setTier(2);
       setErrorMessage(null);
     } else if (initialTitle) {
       setTitle(initialTitle);
@@ -64,6 +67,7 @@ export function AddTaskSheet({
       phaseId,
       focusDurationMinutes: clampDurationMinutes(Number(focusMinutes), defaultFocusMinutes),
       breakDurationMinutes: clampBreakMinutes(Number(breakMinutes), defaultBreakMinutes),
+      tier,
     });
     if (result.ok) {
       setTitle('');
@@ -191,6 +195,26 @@ export function AddTaskSheet({
         This preset feeds the focus screen for this daily goal.
       </Text>
 
+      <View style={styles.projectSection}>
+        <Text style={styles.projectLabel}>Task tier</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.projectScroll}>
+          {([1, 2, 3, 4, 5] as TaskTier[]).map((t) => {
+            const selected = tier === t;
+            return (
+              <TouchableOpacity
+                key={t}
+                style={[styles.tierChip, selected && styles.tierChipActive]}
+                onPress={() => setTier(t)}
+              >
+                <Text style={[styles.tierChipText, selected && styles.tierChipTextActive]}>
+                  T{t} · {TIER_XP[t]}xp
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
       <View style={styles.actions}>
@@ -292,6 +316,18 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: C.textSecondary,
   },
+  tierChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: C.border,
+    marginRight: 8,
+    backgroundColor: C.surface,
+  },
+  tierChipActive: { backgroundColor: C.accent, borderColor: C.accent },
+  tierChipText: { fontSize: 13, color: C.text, fontWeight: '600' },
+  tierChipTextActive: { color: '#fff' },
   errorText: { fontSize: 13, color: C.danger, marginBottom: 16 },
   actions: { flexDirection: 'row', gap: 12, marginTop: 8 },
   cancelButton: {

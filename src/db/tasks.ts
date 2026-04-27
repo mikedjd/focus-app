@@ -1,5 +1,5 @@
 import type * as SQLite from 'expo-sqlite';
-import type { DailyTask, DailyPhaseId, TaskWriteResult } from '../types';
+import type { DailyTask, DailyPhaseId, TaskTier, TaskWriteResult } from '../types';
 import {
   STANDALONE_TASKS_GOAL_ID,
   STANDALONE_TASKS_GOAL_TITLE,
@@ -14,6 +14,7 @@ import {
 import { todayString } from '../utils/dates';
 import { generateId } from '../utils/ids';
 import { dbRefreshResumeContext } from './context';
+import { dbUpsertDailyXp, dbRecalcStreakAndHealth } from './game';
 import { hasColumn, runDb } from './schema';
 
 const DAILY_TASK_CAP = 3;
@@ -31,6 +32,7 @@ type DailyTaskRow = {
   completed_at: number | null;
   sort_order: number;
   created_at: number;
+  updated_at?: number | null;
   task_type?: string | null;
   effort_level?: string | null;
   milestone_id?: string | null;
@@ -38,7 +40,15 @@ type DailyTaskRow = {
   phase_id?: string | null;
   focus_duration_minutes?: number | null;
   break_duration_minutes?: number | null;
+  tier?: number | null;
+  linked_site?: string | null;
+  is_recovery_task?: number | null;
 };
+
+function normalizeTier(value: number | null | undefined): TaskTier {
+  if (value === 1 || value === 2 || value === 3 || value === 4 || value === 5) return value;
+  return 2;
+}
 
 function mapTask(row: DailyTaskRow): DailyTask {
   return {
@@ -54,6 +64,7 @@ function mapTask(row: DailyTaskRow): DailyTask {
     completedAt: row.completed_at,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
+    updatedAt: row.updated_at ?? row.completed_at ?? row.created_at,
     taskType: ((row.task_type as DailyTask['taskType']) ?? 'goal') || 'goal',
     effortLevel: (row.effort_level as DailyTask['effortLevel']) ?? '',
     milestoneId: row.milestone_id ?? null,
@@ -61,6 +72,9 @@ function mapTask(row: DailyTaskRow): DailyTask {
     phaseId: normalizePhaseId(row.phase_id, ((row.task_type as DailyTask['taskType']) ?? 'goal') || 'goal', (row.effort_level as DailyTask['effortLevel']) ?? ''),
     focusDurationMinutes: clampDurationMinutes(row.focus_duration_minutes ?? DEFAULT_FOCUS_MINUTES, DEFAULT_FOCUS_MINUTES),
     breakDurationMinutes: clampBreakMinutes(row.break_duration_minutes ?? DEFAULT_BREAK_MINUTES, DEFAULT_BREAK_MINUTES),
+    tier: normalizeTier(row.tier),
+    linkedSite: row.linked_site ?? null,
+    isRecoveryTask: row.is_recovery_task === 1,
   };
 }
 
@@ -124,6 +138,9 @@ export function dbCreateTask(
     phaseId?: DailyPhaseId;
     focusDurationMinutes?: number;
     breakDurationMinutes?: number;
+    tier?: TaskTier;
+    linkedSite?: string | null;
+    isRecoveryTask?: boolean;
   }
 ): TaskWriteResult {
   return runDb('create task', { ok: false, reason: 'db_error' } as TaskWriteResult, (db) => {
@@ -177,6 +194,7 @@ export function dbCreateTask(
       }
     }
 
+    const now = Date.now();
     const task: DailyTask = {
       id: generateId(),
       goalId: resolvedGoalId,
@@ -189,7 +207,8 @@ export function dbCreateTask(
       status: 'pending',
       completedAt: null,
       sortOrder: getTaskCountForDate(db, targetDate),
-      createdAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
       taskType,
       effortLevel,
       milestoneId: options?.milestoneId ?? null,
@@ -197,6 +216,9 @@ export function dbCreateTask(
       phaseId,
       focusDurationMinutes: clampDurationMinutes(options?.focusDurationMinutes ?? defaultFocusMinutes, defaultFocusMinutes),
       breakDurationMinutes: clampBreakMinutes(options?.breakDurationMinutes ?? defaultBreakMinutes, defaultBreakMinutes),
+      tier: options?.tier ?? 2,
+      linkedSite: options?.linkedSite ?? null,
+      isRecoveryTask: options?.isRecoveryTask ?? false,
     };
 
     insertTaskRow(db, task);
@@ -270,6 +292,7 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
         return { ok: false, reason: 'task_limit_reached' };
       }
 
+      const now = Date.now();
       const task: DailyTask = {
         id: generateId(),
         goalId: sourceRow.goal_id,
@@ -282,7 +305,8 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
         status: 'pending',
         completedAt: null,
         sortOrder: getTaskCountForDate(db, targetDate),
-        createdAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
         taskType: ((sourceRow.task_type as DailyTask['taskType']) ?? 'goal') || 'goal',
         effortLevel: (sourceRow.effort_level as DailyTask['effortLevel']) ?? '',
         milestoneId: sourceRow.milestone_id ?? null,
@@ -300,6 +324,9 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
           sourceRow.break_duration_minutes ?? DEFAULT_BREAK_MINUTES,
           DEFAULT_BREAK_MINUTES
         ),
+        tier: normalizeTier(sourceRow.tier),
+        linkedSite: sourceRow.linked_site ?? null,
+        isRecoveryTask: sourceRow.is_recovery_task === 1,
       };
 
       insertTaskRow(db, task);
@@ -312,20 +339,46 @@ export function dbCarryForwardTask(taskId: string): TaskWriteResult {
 
 export function dbCompleteTask(id: string): boolean {
   return runDb('complete task', false, (db) => {
-    db.runSync("UPDATE daily_tasks SET status = 'done', completed_at = ? WHERE id = ?", [
-      Date.now(),
+    const now = Date.now();
+    db.runSync("UPDATE daily_tasks SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ?", [
+      now,
+      now,
       id,
     ]);
     dbRefreshResumeContext();
+
+    // Fire-and-forget XP update (non-critical)
+    try {
+      const task = db.getFirstSync<{ goal_id: string; date: string }>(
+        'SELECT goal_id, date FROM daily_tasks WHERE id = ?',
+        [id]
+      );
+      if (task) {
+        dbUpsertDailyXp(task.goal_id, task.date);
+        dbRecalcStreakAndHealth(task.goal_id);
+      }
+    } catch (_) {
+      // ignore
+    }
+
     return true;
   });
 }
 
 export function dbUncompleteTask(id: string): boolean {
   return runDb('uncomplete task', false, (db) => {
-    db.runSync("UPDATE daily_tasks SET status = 'pending', completed_at = NULL WHERE id = ?", [
+    const task = db.getFirstSync<{ goal_id: string; date: string }>(
+      'SELECT goal_id, date FROM daily_tasks WHERE id = ?',
+      [id]
+    );
+    db.runSync("UPDATE daily_tasks SET status = 'pending', completed_at = NULL, updated_at = ? WHERE id = ?", [
+      Date.now(),
       id,
     ]);
+    if (task) {
+      dbUpsertDailyXp(task.goal_id, task.date);
+      dbRecalcStreakAndHealth(task.goal_id);
+    }
     dbRefreshResumeContext();
     return true;
   });
@@ -333,7 +386,18 @@ export function dbUncompleteTask(id: string): boolean {
 
 export function dbDropTask(id: string): boolean {
   return runDb('drop task', false, (db) => {
-    db.runSync("UPDATE daily_tasks SET status = 'dropped' WHERE id = ?", [id]);
+    const task = db.getFirstSync<{ goal_id: string; date: string }>(
+      'SELECT goal_id, date FROM daily_tasks WHERE id = ?',
+      [id]
+    );
+    db.runSync("UPDATE daily_tasks SET status = 'dropped', updated_at = ? WHERE id = ?", [
+      Date.now(),
+      id,
+    ]);
+    if (task) {
+      dbUpsertDailyXp(task.goal_id, task.date);
+      dbRecalcStreakAndHealth(task.goal_id);
+    }
     dbRefreshResumeContext();
     return true;
   });
@@ -384,6 +448,18 @@ function getTaskSelectClause(db: SQLite.SQLiteDatabase): string {
   const breakDurationSelect = hasColumn(db, 'daily_tasks', 'break_duration_minutes')
     ? 'break_duration_minutes'
     : `${DEFAULT_BREAK_MINUTES} AS break_duration_minutes`;
+  const tierSelect = hasColumn(db, 'daily_tasks', 'tier')
+    ? 'tier'
+    : '2 AS tier';
+  const updatedAtSelect = hasColumn(db, 'daily_tasks', 'updated_at')
+    ? 'updated_at'
+    : `${Date.now()} AS updated_at`;
+  const linkedSiteSelect = hasColumn(db, 'daily_tasks', 'linked_site')
+    ? 'linked_site'
+    : 'NULL AS linked_site';
+  const isRecoveryTaskSelect = hasColumn(db, 'daily_tasks', 'is_recovery_task')
+    ? 'is_recovery_task'
+    : '0 AS is_recovery_task';
 
   return `
     SELECT
@@ -399,13 +475,17 @@ function getTaskSelectClause(db: SQLite.SQLiteDatabase): string {
       completed_at,
       sort_order,
       ${createdAtSelect},
+      ${updatedAtSelect},
       ${taskTypeSelect},
       ${effortLevelSelect},
       ${milestoneSelect},
       ${windowSelect},
       ${phaseSelect},
       ${focusDurationSelect},
-      ${breakDurationSelect}
+      ${breakDurationSelect},
+      ${tierSelect},
+      ${linkedSiteSelect},
+      ${isRecoveryTaskSelect}
     FROM daily_tasks
   `;
 }
@@ -470,6 +550,22 @@ function insertTaskRow(db: SQLite.SQLiteDatabase, task: DailyTask): void {
   if (hasColumn(db, 'daily_tasks', 'break_duration_minutes')) {
     columns.push('break_duration_minutes');
     values.push(task.breakDurationMinutes);
+  }
+  if (hasColumn(db, 'daily_tasks', 'tier')) {
+    columns.push('tier');
+    values.push(task.tier);
+  }
+  if (hasColumn(db, 'daily_tasks', 'linked_site')) {
+    columns.push('linked_site');
+    values.push(task.linkedSite);
+  }
+  if (hasColumn(db, 'daily_tasks', 'is_recovery_task')) {
+    columns.push('is_recovery_task');
+    values.push(task.isRecoveryTask ? 1 : 0);
+  }
+  if (hasColumn(db, 'daily_tasks', 'updated_at')) {
+    columns.push('updated_at');
+    values.push(task.updatedAt);
   }
 
   const placeholders = columns.map(() => '?').join(', ');

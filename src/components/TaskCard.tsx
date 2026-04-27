@@ -32,10 +32,12 @@ export function TaskCard({ task, isNextUp = false, onToggle, onFocus, onDrop }: 
   const chips = [
     phase.title,
     task.goalId === STANDALONE_TASKS_GOAL_ID ? 'Secondary' : null,
+    task.isRecoveryTask ? (done ? 'Recovery complete: +10 build health' : 'Recovery task assigned') : null,
     task.taskType === 'admin' ? 'Admin' : null,
     task.effortLevel ? task.effortLevel : null,
     task.scheduledWindowStart ? `Window ${task.scheduledWindowStart}` : null,
     `${task.focusDurationMinutes}/${task.breakDurationMinutes} min`,
+    `T${task.tier ?? 2}`,
   ].filter(Boolean) as string[];
 
   // Clamp revealed drop-zone width for the background hint
@@ -107,7 +109,13 @@ export function TaskCard({ task, isNextUp = false, onToggle, onFocus, onDrop }: 
       </Animated.View>
 
       <Animated.View
-        style={[styles.row, done && styles.rowDone, isNextUp && styles.rowNextUp, { transform: [{ translateX }] }]}
+        style={[
+          styles.row,
+          task.isRecoveryTask && styles.rowRecovery,
+          done && styles.rowDone,
+          isNextUp && styles.rowNextUp,
+          { transform: [{ translateX }] },
+        ]}
         {...panResponder.panHandlers}
       >
         {isNextUp ? <View style={styles.nextUpBar} /> : null}
@@ -141,6 +149,11 @@ export function TaskCard({ task, isNextUp = false, onToggle, onFocus, onDrop }: 
           {task.nextStep ? (
             <Text style={[styles.nextStep, done && styles.titleDone]} numberOfLines={2}>
               Next: {task.nextStep}
+            </Text>
+          ) : null}
+          {task.isRecoveryTask ? (
+            <Text style={[styles.recoveryCue, done && styles.recoveryCueDone]}>
+              {done ? 'Recovery complete: +10 build health' : 'Recovery task assigned'}
             </Text>
           ) : null}
         </TouchableOpacity>
@@ -191,6 +204,10 @@ const styles = StyleSheet.create({
     backgroundColor: C.surfaceSecondary,
     borderColor: 'transparent',
     paddingVertical: 12,
+  },
+  rowRecovery: {
+    borderColor: '#FFD8A8',
+    backgroundColor: '#FFFBF2',
   },
   rowNextUp: {
     borderColor: C.accent,
@@ -258,6 +275,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: C.textSecondary,
     lineHeight: 18,
+  },
+  recoveryCue: {
+    marginTop: 5,
+    fontSize: 12,
+    color: '#C05621',
+    fontWeight: '800',
+  },
+  recoveryCueDone: {
+    color: C.success,
   },
   titleDone: {
     color: C.textMuted,

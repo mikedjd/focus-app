@@ -36,12 +36,12 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="calendar"
+        name="goals"
         options={{
-          title: 'Plan',
+          title: 'Goal',
           tabBarIcon: ({ focused }) => (
-            <Ionicons
-              name={focused ? 'calendar' : 'calendar-outline'}
+            <MaterialCommunityIcons
+              name={focused ? 'bullseye-arrow' : 'bullseye'}
               size={20}
               color={focused ? C.tabActive : C.tabInactive}
             />
@@ -49,12 +49,12 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="goals"
+        name="build"
         options={{
-          title: 'Goal',
+          title: 'Build',
           tabBarIcon: ({ focused }) => (
-            <MaterialCommunityIcons
-              name={focused ? 'bullseye-arrow' : 'bullseye'}
+            <Ionicons
+              name={focused ? 'trending-up' : 'trending-up-outline'}
               size={20}
               color={focused ? C.tabActive : C.tabInactive}
             />

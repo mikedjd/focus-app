@@ -5,25 +5,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CreateGoalSheet } from '../../src/components/goals/CreateGoalSheet';
 import { EditFocusSheet } from '../../src/components/goals/EditFocusSheet';
 import { EditGoalSheet } from '../../src/components/goals/EditGoalSheet';
-import { GoalTrail } from '../../src/components/goals/GoalTrail';
-import { EditWhySheet } from '../../src/components/goals/EditWhySheet';
-import { MilestoneList } from '../../src/components/MilestoneList';
 import { isReviewDue } from '../../src/api/client';
 import { C } from '../../src/constants/colors';
 import { useGoals } from '../../src/hooks/useGoals';
-import { useMilestones } from '../../src/hooks/useMilestones';
-import { useParkingLot } from '../../src/hooks/useParkingLot';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatShortDate } from '../../src/utils/dates';
-import { useRouter } from 'expo-router';
 
-type ActiveSheet = 'create' | 'editGoal' | 'editWhy' | 'editFocus' | null;
-
-const SYSTEM_STEPS = [
-  { n: '1', text: 'Define one goal' },
-  { n: '2', text: 'Add why it matters' },
-  { n: '3', text: 'Use it to anchor daily tasks' },
-];
+type ActiveSheet = 'create' | 'editGoal' | 'editFocus' | null;
 
 export default function GoalsScreen() {
   const {
@@ -37,11 +25,6 @@ export default function GoalsScreen() {
   } = useGoals();
   const setReviewDue = useAppStore((state) => state.setReviewDue);
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
-  const { milestones, progress, addMilestone, toggleMilestone, deleteMilestone } = useMilestones(
-    activeGoal?.id
-  );
-  const { count: parkingCount, divert } = useParkingLot();
-  const router = useRouter();
 
   useFocusEffect(
     useCallback(() => {
@@ -62,9 +45,7 @@ export default function GoalsScreen() {
         {
           text: 'Complete',
           style: 'destructive',
-          onPress: () => {
-            void completeGoal(activeGoal.id);
-          },
+          onPress: () => { void completeGoal(activeGoal.id); },
         },
       ]
     );
@@ -81,176 +62,72 @@ export default function GoalsScreen() {
           <View style={styles.emptyState}>
             <Text style={styles.emptyHeadline}>One goal. One reason.</Text>
             <Text style={styles.emptySubtitle}>That's the system.</Text>
-
-            <View style={styles.stepList}>
-              {SYSTEM_STEPS.map((step) => (
-                <View key={step.n} style={styles.stepRow}>
-                  <View style={styles.stepBadge}>
-                    <Text style={styles.stepBadgeText}>{step.n}</Text>
-                  </View>
-                  <Text style={styles.stepText}>{step.text}</Text>
-                </View>
-              ))}
-            </View>
-
             <TouchableOpacity
               style={styles.setGoalButton}
               onPress={() => setActiveSheet('create')}
               activeOpacity={0.85}
             >
-              <Text style={styles.setGoalButtonText}>Set a Goal</Text>
+              <Text style={styles.setGoalButtonText}>Set a goal</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.card}>
+            {/* Goal title + edit */}
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardLabel}>ACTIVE GOAL</Text>
+              <Text style={styles.cardLabel}>Active goal</Text>
               <TouchableOpacity onPress={() => setActiveSheet('editGoal')} hitSlop={12}>
                 <Text style={styles.editLink}>Edit</Text>
               </TouchableOpacity>
             </View>
             <Text style={styles.goalTitle}>{activeGoal.title}</Text>
-            <Text style={styles.goalOutcome}>{activeGoal.targetOutcome}</Text>
 
             <View style={styles.metaRow}>
               {activeGoal.targetDate ? (
                 <View style={styles.metaChip}>
-                  <Text style={styles.metaChipText}>Target {formatShortDate(activeGoal.targetDate)}</Text>
+                  <Text style={styles.metaChipText}>Due {formatShortDate(activeGoal.targetDate)}</Text>
                 </View>
-              ) : (
-                <View style={styles.metaChip}>
-                  <Text style={styles.metaChipText}>No fixed date</Text>
-                </View>
-              )}
+              ) : null}
               {activeGoal.metric ? (
                 <View style={styles.metaChip}>
                   <Text style={styles.metaChipText}>{activeGoal.metric}</Text>
                 </View>
               ) : null}
+              <View style={styles.metaChip}>
+                <Text style={styles.metaChipText}>Phase {activeGoal.difficultyPhase}</Text>
+              </View>
+              <View style={styles.metaChip}>
+                <Text style={styles.metaChipText}>Health {activeGoal.buildHealth}/100</Text>
+              </View>
             </View>
 
+            {/* Why it matters */}
             <View style={styles.divider} />
-            <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardLabel}>WHY IT MATTERS</Text>
-              <TouchableOpacity onPress={() => setActiveSheet('editWhy')} hitSlop={12}>
-                <Text style={styles.editLink}>Edit</Text>
-              </TouchableOpacity>
-            </View>
-            {activeGoal.anchorWhy ? (
-              <Text style={styles.anchorText}>{activeGoal.anchorWhy}</Text>
+            <Text style={styles.cardLabel}>Why it matters</Text>
+            {activeGoal.anchorWhy || activeGoal.why ? (
+              <Text style={styles.bodyText}>{activeGoal.anchorWhy || activeGoal.why}</Text>
             ) : (
-              <TouchableOpacity onPress={() => setActiveSheet('editWhy')} activeOpacity={0.7}>
-                <Text style={styles.whyPlaceholder}>Add the real reason behind this goal →</Text>
+              <TouchableOpacity onPress={() => setActiveSheet('editGoal')} activeOpacity={0.7}>
+                <Text style={styles.placeholder}>Add the real reason behind this goal →</Text>
               </TouchableOpacity>
             )}
 
-            <View style={styles.divider} />
-            <Text style={styles.cardLabel}>COST OF DRIFT</Text>
-            {activeGoal.anchorDrift ? (
-              <Text style={styles.anchorText}>{activeGoal.anchorDrift}</Text>
-            ) : (
-              <TouchableOpacity onPress={() => setActiveSheet('editWhy')} activeOpacity={0.7}>
-                <Text style={styles.whyPlaceholder}>Add the consequence of letting this slide →</Text>
-              </TouchableOpacity>
-            )}
-
-            {(activeGoal.practicalReason || activeGoal.emotionalReason || activeGoal.costOfDrift) ? (
-              <>
-                <View style={styles.divider} />
-                <Text style={styles.cardLabel}>WHY STACK</Text>
-                {activeGoal.practicalReason ? (
-                  <View style={styles.stackRow}>
-                    <Text style={styles.stackLabel}>Practical</Text>
-                    <Text style={styles.stackText}>{activeGoal.practicalReason}</Text>
-                  </View>
-                ) : null}
-                {activeGoal.emotionalReason ? (
-                  <View style={styles.stackRow}>
-                    <Text style={styles.stackLabel}>Emotional</Text>
-                    <Text style={styles.stackText}>{activeGoal.emotionalReason}</Text>
-                  </View>
-                ) : null}
-                {activeGoal.costOfDrift ? (
-                  <View style={styles.stackRow}>
-                    <Text style={styles.stackLabel}>Drift</Text>
-                    <Text style={styles.stackText}>{activeGoal.costOfDrift}</Text>
-                  </View>
-                ) : null}
-              </>
-            ) : null}
-
+            {/* Weekly focus */}
             <View style={styles.divider} />
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardLabel}>THIS WEEK'S FOCUS</Text>
+              <Text style={styles.cardLabel}>This week's focus</Text>
               <TouchableOpacity onPress={() => setActiveSheet('editFocus')} hitSlop={12}>
                 <Text style={styles.editLink}>{weeklyFocus ? 'Edit' : 'Set'}</Text>
               </TouchableOpacity>
             </View>
             {weeklyFocus ? (
-              <Text style={styles.focusText}>{weeklyFocus.focus}</Text>
+              <Text style={styles.bodyText}>{weeklyFocus.focus}</Text>
             ) : (
               <TouchableOpacity onPress={() => setActiveSheet('editFocus')} activeOpacity={0.7}>
-                <Text style={styles.whyPlaceholder}>What moves this goal forward this week? →</Text>
+                <Text style={styles.placeholder}>What moves this goal forward this week? →</Text>
               </TouchableOpacity>
             )}
 
-            <View style={styles.divider} />
-            <MilestoneList
-              milestones={milestones}
-              percent={progress?.percent ?? 0}
-              completed={progress?.completedMilestones ?? 0}
-              total={progress?.totalMilestones ?? 0}
-              onAdd={addMilestone}
-              onToggle={toggleMilestone}
-              onDelete={deleteMilestone}
-            />
-
-            <View style={styles.divider} />
-            <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardLabel}>FRICTION FLOOR</Text>
-              <Text style={styles.frictionValue}>{activeGoal.currentFrictionMinutes} min</Text>
-            </View>
-            <Text style={styles.frictionHint}>
-              Start at {activeGoal.currentFrictionMinutes} min sessions. The more you sit down, the
-              higher the floor rises.
-            </Text>
-
-            <View style={styles.divider} />
-            <GoalTrail goalId={activeGoal.id} />
-
-            <View style={styles.divider} />
-            <TouchableOpacity
-              style={styles.parkingLink}
-              activeOpacity={0.7}
-              onPress={() => router.push('/parking-lot')}
-            >
-              <Text style={styles.parkingLinkText}>
-                Parking lot {parkingCount > 0 ? `(${parkingCount})` : ''} →
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.parkingLink}
-              activeOpacity={0.7}
-              onPress={() => router.push('/energy-windows')}
-            >
-              <Text style={styles.parkingLinkText}>Energy windows →</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.parkingLink}
-              activeOpacity={0.7}
-              onPress={() => setActiveSheet('create')}
-            >
-              <Text style={styles.parkingLinkText}>Park a new idea →</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.parkingLink}
-              activeOpacity={0.7}
-              onPress={() => router.push('/settings')}
-            >
-              <Text style={styles.parkingLinkText}>Triage settings →</Text>
-            </TouchableOpacity>
-
-            {/* Complete action — anchored at bottom of card, secondary */}
+            {/* Complete */}
             <View style={styles.divider} />
             <TouchableOpacity onPress={handleCompleteGoal} activeOpacity={0.7}>
               <Text style={styles.completeLink}>Mark goal complete</Text>
@@ -263,14 +140,8 @@ export default function GoalsScreen() {
         visible={activeSheet === 'create'}
         onClose={() => setActiveSheet(null)}
         onSubmit={(input) => {
-          if (activeGoal) {
-            const why = input.anchorWhy || input.targetOutcome || '';
-            divert(input.title, why);
-            Alert.alert('Parked for later', 'That idea is in the parking lot for 7 days.');
-            setActiveSheet(null);
-            return;
-          }
           void createGoal(input);
+          setActiveSheet(null);
         }}
       />
       <EditGoalSheet
@@ -278,15 +149,6 @@ export default function GoalsScreen() {
         goal={activeGoal}
         onClose={() => setActiveSheet(null)}
         onSubmit={(goalId, input) => void updateGoal(goalId, input)}
-      />
-      <EditWhySheet
-        visible={activeSheet === 'editWhy'}
-        goal={activeGoal}
-        onClose={() => setActiveSheet(null)}
-        onSubmit={(goalId, input) => {
-          if (!activeGoal || goalId !== activeGoal.id) return;
-          void updateGoal(goalId, input);
-        }}
       />
       <EditFocusSheet
         visible={activeSheet === 'editFocus'}
@@ -304,91 +166,19 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: { paddingHorizontal: 20, paddingBottom: 40 },
   header: { paddingTop: 16, marginBottom: 20 },
-  screenTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: C.text,
-    letterSpacing: -0.5,
-  },
-  frictionValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: C.accent,
-    fontVariant: ['tabular-nums'],
-  },
-  frictionHint: {
-    color: C.textSecondary,
-    fontSize: 13,
-    marginTop: 4,
-    lineHeight: 18,
-  },
-  parkingLink: {
-    marginTop: 10,
-  },
-  parkingLinkText: {
-    color: C.accent,
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  screenTitle: { fontSize: 28, fontWeight: '700', color: C.text, letterSpacing: -0.5 },
 
-  // ─── Empty state ───────────────────────────────────────────────
-  emptyState: {
-    paddingTop: 20,
-    paddingHorizontal: 4,
-  },
-  emptyHeadline: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: C.text,
-    letterSpacing: -0.3,
-    marginBottom: 4,
-  },
-  emptySubtitle: {
-    fontSize: 16,
-    color: C.textSecondary,
-    marginBottom: 28,
-  },
-  stepList: {
-    gap: 14,
-    marginBottom: 32,
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  stepBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: C.accentLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  stepBadgeText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: C.accent,
-  },
-  stepText: {
-    fontSize: 16,
-    color: C.text,
-    fontWeight: '500',
-  },
+  emptyState: { paddingTop: 20, gap: 8 },
+  emptyHeadline: { fontSize: 22, fontWeight: '700', color: C.text, letterSpacing: -0.3 },
+  emptySubtitle: { fontSize: 16, color: C.textSecondary, marginBottom: 20 },
   setGoalButton: {
     backgroundColor: C.accent,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
   },
-  setGoalButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-  },
+  setGoalButtonText: { fontSize: 16, color: '#fff', fontWeight: '600' },
 
-  // ─── Goal card ─────────────────────────────────────────────────
   card: {
     backgroundColor: C.surface,
     borderRadius: 16,
@@ -409,82 +199,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: C.accent,
     letterSpacing: 1,
+    textTransform: 'uppercase',
   },
-  editLink: {
-    fontSize: 14,
-    color: C.accent,
-    fontWeight: '500',
-  },
+  editLink: { fontSize: 14, color: C.accent, fontWeight: '500' },
   goalTitle: {
     fontSize: 22,
     fontWeight: '700',
     color: C.text,
     letterSpacing: -0.3,
     lineHeight: 30,
-    marginBottom: 6,
+    marginBottom: 12,
   },
-  goalOutcome: {
-    fontSize: 15,
-    color: C.textSecondary,
-    lineHeight: 22,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 14,
-  },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   metaChip: {
     backgroundColor: C.surfaceSecondary,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  metaChipText: {
-    fontSize: 12,
-    color: C.textSecondary,
-    fontWeight: '600',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: C.border,
-    marginVertical: 14,
-  },
-  anchorText: {
-    fontSize: 15,
-    color: C.text,
-    lineHeight: 22,
-  },
-  whyPlaceholder: {
-    fontSize: 14,
-    color: C.accent,
-    lineHeight: 20,
-  },
-  stackRow: {
-    marginTop: 12,
-    gap: 4,
-  },
-  stackLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: C.textMuted,
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-  },
-  stackText: {
-    fontSize: 14,
-    color: C.text,
-    lineHeight: 20,
-  },
-  focusText: {
-    fontSize: 15,
-    color: C.text,
-    lineHeight: 22,
-  },
-  completeLink: {
-    fontSize: 14,
-    color: C.textMuted,
-    textAlign: 'center',
-    paddingVertical: 2,
-  },
+  metaChipText: { fontSize: 12, color: C.textSecondary, fontWeight: '600' },
+  divider: { height: 1, backgroundColor: C.border, marginVertical: 14 },
+  bodyText: { fontSize: 15, color: C.text, lineHeight: 22 },
+  placeholder: { fontSize: 14, color: C.accent, lineHeight: 20 },
+  completeLink: { fontSize: 14, color: C.textMuted, textAlign: 'center', paddingVertical: 2 },
 });

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import type { Goal, GoalWriteInput, WeeklyFocus } from '../types';
 import {
   completeGoal as apiCompleteGoal,
+  createDefaultGoal as apiCreateDefaultGoal,
   createGoal as apiCreateGoal,
   getActiveGoal,
   getCurrentWeeklyFocus,
@@ -38,6 +39,11 @@ export function useGoals() {
     [refresh]
   );
 
+  const createDefaultGoal = useCallback(async () => {
+    await apiCreateDefaultGoal();
+    await refresh();
+  }, [refresh]);
+
   const updateGoal = useCallback(
     async (id: string, input: GoalWriteInput) => {
       await apiUpdateGoal(id, input);
@@ -66,6 +72,7 @@ export function useGoals() {
     activeGoal,
     weeklyFocus,
     createGoal,
+    createDefaultGoal,
     updateGoal,
     completeGoal,
     setWeeklyFocusText,

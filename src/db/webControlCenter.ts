@@ -14,7 +14,6 @@ import type {
   ParkingLotItem,
 } from '../types';
 import { generateId } from '../utils/ids';
-import { computeFrictionMinutes } from '../utils/frictionCurve';
 
 const KEY_MILESTONES = 'adhd_milestones';
 const KEY_ENERGY = 'adhd_energy_windows';
@@ -298,6 +297,6 @@ export function dbRecomputeGoalFriction(goalId: string): {
   // Web fallback: we do not aggregate focus sessions; just echo defaults.
   return {
     weeklySeatedSeconds: 0,
-    currentFrictionMinutes: computeFrictionMinutes(0),
+    currentFrictionMinutes: 2,
   };
 }

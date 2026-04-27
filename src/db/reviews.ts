@@ -2,6 +2,7 @@ import type { DailyTask, WeeklyReview } from '../types';
 import { getWeekStart } from '../utils/dates';
 import { generateId } from '../utils/ids';
 import { dbGetTasksForDate } from './tasks';
+import { dbRecordWeeklyInspectionForActiveGoal } from './game';
 import { runDb } from './schema';
 
 type WeeklyReviewRow = {
@@ -60,6 +61,7 @@ export function dbSaveReview(
          WHERE id = ?`,
         [wins, whatDrifted, driftReasonsStr, nextWeekAdjustment, now, existing.id]
       );
+      dbRecordWeeklyInspectionForActiveGoal(db, weekOf);
       return {
         ...mapReview(existing),
         wins,
@@ -95,6 +97,7 @@ export function dbSaveReview(
       ]
     );
 
+    dbRecordWeeklyInspectionForActiveGoal(db, weekOf);
     return review;
   });
 }

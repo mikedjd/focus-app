@@ -20,12 +20,24 @@ import {
 
 import {
   dbGetActiveGoal as nativeGetActiveGoal,
+  dbCreateDefaultGoal as nativeCreateDefaultGoal,
   dbCreateGoal as nativeCreateGoal,
   dbUpdateGoal as nativeUpdateGoal,
   dbCompleteGoal as nativeCompleteGoal,
   dbGetCurrentWeeklyFocus as nativeGetCurrentWeeklyFocus,
   dbUpsertWeeklyFocus as nativeUpsertWeeklyFocus,
 } from './goals';
+
+import {
+  dbGetGameStats as nativeGetGameStats,
+  dbUpsertDailyXp as nativeUpsertDailyXp,
+  dbRecalcStreakAndHealth as nativeRecalcStreakAndHealth,
+  dbCalculateBuildPhase as nativeCalculateBuildPhase,
+  dbCalculateDifficultyPhase as nativeCalculateDifficultyPhase,
+  dbCalculateGoalStatus as nativeCalculateGoalStatus,
+  dbMaybeUpgradeDifficultyPhase as nativeMaybeUpgradeDifficultyPhase,
+  dbRunWeeklyInspection as nativeRunWeeklyInspection,
+} from './game';
 
 import {
   dbGetTodayTasks as nativeGetTodayTasks,
@@ -114,6 +126,7 @@ export const dbRefreshResumeContext = isWeb ? webDb.dbRefreshResumeContext : nat
 
 // Goals
 export const dbGetActiveGoal         = isWeb ? webDb.dbGetActiveGoal         : nativeGetActiveGoal;
+export const dbCreateDefaultGoal     = isWeb ? webDb.dbCreateDefaultGoal     : nativeCreateDefaultGoal;
 export const dbCreateGoal            = isWeb ? webDb.dbCreateGoal            : nativeCreateGoal;
 export const dbUpdateGoal            = isWeb ? webDb.dbUpdateGoal            : nativeUpdateGoal;
 export const dbCompleteGoal          = isWeb ? webDb.dbCompleteGoal          : nativeCompleteGoal;
@@ -129,6 +142,16 @@ export const dbCarryForwardTask = isWeb ? webDb.dbCarryForwardTask : nativeCarry
 export const dbCompleteTask     = isWeb ? webDb.dbCompleteTask     : nativeCompleteTask;
 export const dbUncompleteTask   = isWeb ? webDb.dbUncompleteTask   : nativeUncompleteTask;
 export const dbDropTask         = isWeb ? webDb.dbDropTask         : nativeDropTask;
+
+// Gamification
+export const dbGetGameStats             = isWeb ? webDb.dbGetGameStats             : nativeGetGameStats;
+export const dbUpsertDailyXp            = isWeb ? webDb.dbUpsertDailyXp            : nativeUpsertDailyXp;
+export const dbRecalcStreakAndHealth    = isWeb ? webDb.dbRecalcStreakAndHealth    : nativeRecalcStreakAndHealth;
+export const dbCalculateBuildPhase      = isWeb ? webDb.dbCalculateBuildPhase      : nativeCalculateBuildPhase;
+export const dbCalculateDifficultyPhase = isWeb ? webDb.dbCalculateDifficultyPhase : nativeCalculateDifficultyPhase;
+export const dbCalculateGoalStatus      = isWeb ? webDb.dbCalculateGoalStatus      : nativeCalculateGoalStatus;
+export const dbMaybeUpgradeDifficultyPhase = isWeb ? webDb.dbMaybeUpgradeDifficultyPhase : nativeMaybeUpgradeDifficultyPhase;
+export const dbRunWeeklyInspection = isWeb ? webDb.dbRunWeeklyInspection : nativeRunWeeklyInspection;
 
 // Reviews
 export const dbGetReviewForWeek = isWeb ? webDb.dbGetReviewForWeek : nativeGetReviewForWeek;

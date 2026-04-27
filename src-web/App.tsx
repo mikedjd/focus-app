@@ -17,6 +17,7 @@ import type {
   FocusExitReason,
   FocusSession,
   Goal,
+  GoalPerformanceStatus,
   GoalStatus,
   GoalWriteInput,
   Habit,
@@ -28,9 +29,12 @@ import type {
   OnboardingDraft,
   Project,
   ResumeContext,
+  TaskTier,
   Vision,
   VisionWriteInput,
+  WeeklyInspection,
 } from '../src/types';
+import { TIER_XP } from '../src/types';
 import {
   formatDate,
   formatDisplayDate,
@@ -39,9 +43,22 @@ import {
   formatShortDate,
   formatWeekRange,
   getPrevWeekStart,
+  getWeekStart,
   todayString,
 } from '../src/utils/dates';
+import {
+  BUILD_PHASES,
+  calculateBuildPhaseIndex,
+  calculateCalendarProgress,
+  calculateForecastStatus,
+  calculateXpProgress,
+  getBuildDecayLevel,
+  getBuildPhaseName,
+  getDaysUntil,
+  getNextUnlockRequirement,
+} from '../src/utils/buildProgress';
 import { generateAnchorLines } from '../src/utils/goalAnchors';
+import { createDefaultGoalInput } from '../src/utils/goalTemplate';
 import { STANDALONE_TASKS_GOAL_ID } from '../src/constants/standaloneTaskGoal';
 
 const DAILY_CAP = 3;
@@ -591,6 +608,14 @@ function GoalModal({
   );
 }
 
+const TIER_LABELS: { tier: TaskTier; label: string }[] = [
+  { tier: 1, label: 'T1 · 5xp' },
+  { tier: 2, label: 'T2 · 15xp' },
+  { tier: 3, label: 'T3 · 40xp' },
+  { tier: 4, label: 'T4 · 100xp' },
+  { tier: 5, label: 'T5 · 300xp' },
+];
+
 function TaskModal({
   open,
   title,
@@ -606,11 +631,12 @@ function TaskModal({
   selectedProjectId: string | null;
   initialTitle?: string;
   onClose: () => void;
-  onSubmit: (title: string, nextStep: string, projectId: string | null) => void;
+  onSubmit: (title: string, nextStep: string, projectId: string | null, tier: TaskTier) => void;
 }) {
   const [taskTitle, setTaskTitle] = useState(initialTitle ?? '');
   const [nextStep, setNextStep] = useState('');
   const [projectId, setProjectId] = useState<string | null>(selectedProjectId);
+  const [tier, setTier] = useState<TaskTier>(2);
 
   useEffect(() => {
     if (!open) {
@@ -620,6 +646,7 @@ function TaskModal({
     setTaskTitle(initialTitle ?? '');
     setNextStep('');
     setProjectId(selectedProjectId);
+    setTier(2);
   }, [initialTitle, open, selectedProjectId]);
 
   const canSubmit = taskTitle.trim().length > 0;
@@ -634,7 +661,7 @@ function TaskModal({
             return;
           }
 
-          onSubmit(taskTitle.trim(), nextStep.trim(), projectId);
+          onSubmit(taskTitle.trim(), nextStep.trim(), projectId, tier);
           onClose();
         }}
       >
@@ -667,6 +694,31 @@ function TaskModal({
             ))}
           </select>
         </label>
+
+        <div className="field">
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>Tier</span>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+            {TIER_LABELS.map(({ tier: t, label }) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTier(t)}
+                style={{
+                  padding: '0.25rem 0.6rem',
+                  borderRadius: '999px',
+                  border: '1px solid',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  borderColor: tier === t ? 'var(--accent, #6c63ff)' : 'var(--border, #ccc)',
+                  background: tier === t ? 'var(--accent, #6c63ff)' : 'transparent',
+                  color: tier === t ? '#fff' : 'inherit',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="form-actions">
           <button className="secondary-button" type="button" onClick={onClose}>
@@ -782,21 +834,35 @@ function TaskRow({
   onDrop: () => void;
 }) {
   return (
-    <div className={`task-row ${task.status === 'done' ? 'is-done' : ''}`}>
+    <div className={`task-row ${task.status === 'done' ? 'is-done' : ''} ${task.isRecoveryTask ? 'is-recovery' : ''}`}>
       <button className={`check-button ${task.status === 'done' ? 'is-done' : ''}`} onClick={onToggle} type="button">
         {task.status === 'done' ? '✓' : ''}
       </button>
       <div className="task-copy">
         <div className="task-title-row">
           <h4>{task.title}</h4>
-          {project ? (
-            <span className="project-pill">
-              <span className="project-dot" style={{ backgroundColor: project.color }} />
-              {project.name}
-            </span>
-          ) : null}
+          <div className="task-badges">
+            <span className="tier-badge">T{task.tier ?? 2}</span>
+            <span className="xp-badge">{TIER_XP[task.tier ?? 2]} XP</span>
+            {task.isRecoveryTask ? (
+              <span className={task.status === 'done' ? 'recovery-badge is-complete' : 'recovery-badge'}>
+                {task.status === 'done' ? 'Recovery complete: +10 build health' : 'Recovery task assigned'}
+              </span>
+            ) : null}
+            {project ? (
+              <span className="project-pill">
+                <span className="project-dot" style={{ backgroundColor: project.color }} />
+                {project.name}
+              </span>
+            ) : null}
+          </div>
         </div>
         {task.nextStep ? <p>{task.nextStep}</p> : null}
+        {task.isRecoveryTask ? (
+          <p className={task.status === 'done' ? 'recovery-copy is-complete' : 'recovery-copy'}>
+            {task.status === 'done' ? 'Recovery complete: +10 build health' : 'Recovery task assigned'}
+          </p>
+        ) : null}
       </div>
       <div className="task-actions">
         {task.status !== 'done' && onFocus ? (
@@ -1391,6 +1457,12 @@ function AppShell() {
             Review
             {reviewDue ? <span className="badge">Due</span> : null}
           </NavLink>
+          <NavLink className="nav-link" to="/inspection">
+            Inspect
+          </NavLink>
+          <NavLink className="nav-link" to="/build">
+            Build
+          </NavLink>
           <NavLink className="nav-link" to="/backup">
             Backup
           </NavLink>
@@ -1404,7 +1476,7 @@ function AppShell() {
   );
 }
 
-function TodayPage() {
+function LegacyTodayPage() {
   const navigate = useNavigate();
   const {
     activeGoalId,
@@ -1760,6 +1832,286 @@ function TodayPage() {
   );
 }
 
+function TodayPage() {
+  const navigate = useNavigate();
+  const { activeGoal, tasks, projects, resumeContext, stats } = useDataSnapshot(() => {
+    const currentGoal = db.dbGetActiveGoal();
+    return {
+      activeGoal: currentGoal,
+      tasks: db.dbGetTodayTasks(),
+      projects: currentGoal ? db.dbGetProjects(currentGoal.id) : [],
+      resumeContext: db.dbGetResumeContext(),
+      stats: currentGoal ? db.dbGetGameStats(currentGoal.id) : null,
+    };
+  });
+
+  const [projectModalOpen, setProjectModalOpen] = useState(false);
+  const [projectFilter, setProjectFilter] = useState<string | null>(null);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [feedback, setFeedback] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (feedback.length === 0) return;
+    const timeout = window.setTimeout(() => setFeedback([]), 2600);
+    return () => window.clearTimeout(timeout);
+  }, [feedback]);
+
+  const visibleTasks = projectFilter
+    ? tasks.filter((task) => task.projectId === projectFilter)
+    : tasks;
+  const doneTasks = tasks.filter((task) => task.status === 'done');
+  const pendingTasks = tasks.filter((task) => task.status === 'pending');
+  const xpAvailable = tasks.reduce((sum, task) => sum + TIER_XP[task.tier ?? 2], 0);
+  const xpEarned = doneTasks.reduce((sum, task) => sum + TIER_XP[task.tier ?? 2], 0);
+  const currentStats = stats ?? (activeGoal ? db.dbGetGameStats(activeGoal.id) : null);
+  const requirement = currentStats?.dailyRequirement ?? (activeGoal ? db.getDailyRequirement(activeGoal) : null);
+  const goalStatus = activeGoal?.performanceStatus ?? 'on_track';
+  const formattedStatus = goalStatus.replace('_', ' ');
+  const dailyComplete = activeGoal ? db.isValidDay(activeGoal, doneTasks) : false;
+  const firstPending = pendingTasks[0] ?? null;
+
+  const handleToggleTask = (task: DailyTask) => {
+    if (!activeGoal) return;
+
+    if (task.status === 'done') {
+      mutate(() => db.dbUncompleteTask(task.id));
+      setFeedback([]);
+      return;
+    }
+
+    const wasValid = db.isValidDay(activeGoal, doneTasks);
+    const result = mutate(() => {
+      db.dbCompleteTask(task.id);
+      const nextTasks = db.dbGetTodayTasks();
+      const nextDone = nextTasks.filter((candidate) => candidate.status === 'done');
+      return { valid: db.isValidDay(activeGoal, nextDone) };
+    });
+
+    const messages = [`+${TIER_XP[task.tier ?? 2]} XP`];
+    if (result.valid && !wasValid) {
+      messages.push('Daily requirement complete');
+    }
+    if (result.valid) {
+      messages.push('Streak maintained');
+    }
+    setFeedback(messages);
+  };
+
+  return (
+    <>
+      <section className="page-header">
+        <div>
+          <p className="eyebrow">Today</p>
+          <h2>Show up to work</h2>
+          <p className="muted-copy">{formatDisplayDate()}</p>
+        </div>
+        <div className="header-actions">
+          <button className="secondary-button" type="button" onClick={() => setProjectModalOpen(true)}>
+            Projects
+          </button>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={!activeGoal || tasks.length >= DAILY_CAP}
+            onClick={() => setTaskModalOpen(true)}
+          >
+            Add task
+          </button>
+        </div>
+      </section>
+
+      <section className="work-dashboard">
+        <div className="work-dashboard-main">
+          <p className="eyebrow">Active goal</p>
+          <h3>{activeGoal?.title ?? 'No active goal'}</h3>
+          <p className="work-phase">
+            {requirement ? `Phase ${requirement.phase}: ${requirement.phaseName}` : 'Set a goal to begin'}
+          </p>
+          <p className="work-minimum">{requirement?.minimumCopy ?? 'Minimum required: 1 task.'}</p>
+        </div>
+        <div className="work-metrics">
+          <div>
+            <span>XP available</span>
+            <strong>{xpAvailable}</strong>
+          </div>
+          <div>
+            <span>XP earned</span>
+            <strong>{xpEarned}</strong>
+          </div>
+          <div>
+            <span>Streak</span>
+            <strong>{currentStats?.currentStreak ?? activeGoal?.currentStreak ?? 0}</strong>
+          </div>
+          <div>
+            <span>Build health</span>
+            <strong>{currentStats?.buildHealth ?? activeGoal?.buildHealth ?? 100}</strong>
+          </div>
+          <div>
+            <span>Status</span>
+            <strong className={`status-text is-${goalStatus}`}>{formattedStatus}</strong>
+          </div>
+        </div>
+      </section>
+
+      {feedback.length > 0 ? (
+        <section className="feedback-strip">
+          {feedback.map((message) => (
+            <span key={message}>{message}</span>
+          ))}
+        </section>
+      ) : null}
+
+      {resumeContext ? (
+        <section className="card banner-card">
+          <div>
+            <p className="eyebrow">Resume</p>
+            <h3>{resumeContext.taskTitle}</h3>
+            <p className="muted-copy">
+              {resumeContext.kind === 'focus-session'
+                ? 'You have a focus session ready to resume.'
+                : `Still pending from ${formatShortDate(resumeContext.fromDate)}.`}
+            </p>
+          </div>
+          <div className="inline-actions">
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => {
+                if (resumeContext.kind === 'focus-session') {
+                  navigate(`/focus?taskId=${resumeContext.taskId}&sessionId=${resumeContext.focusSessionId}`);
+                  return;
+                }
+                const result = mutate(() => db.dbCarryForwardTask(resumeContext.taskId));
+                if (!result.ok) window.alert("Today's task lane is already full.");
+              }}
+            >
+              {resumeContext.kind === 'focus-session' ? 'Resume focus' : 'Carry forward'}
+            </button>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => mutate(() => db.dbDismissResumeContext(resumeContext))}
+            >
+              Dismiss
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {projects.length > 0 ? (
+        <section className="chips">
+          <button
+            className={`chip ${projectFilter === null ? 'is-active' : ''}`}
+            type="button"
+            onClick={() => setProjectFilter(null)}
+          >
+            All
+          </button>
+          {projects.map((project) => (
+            <button
+              key={project.id}
+              className={`chip ${projectFilter === project.id ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setProjectFilter(project.id)}
+            >
+              <span className="project-dot" style={{ backgroundColor: project.color }} />
+              {project.name}
+            </button>
+          ))}
+        </section>
+      ) : null}
+
+      {firstPending ? (
+        <section className="card next-up-card">
+          <div>
+            <p className="eyebrow">Next up</p>
+            <h3>{firstPending.title}</h3>
+          </div>
+          <button className="primary-button" type="button" onClick={() => navigate(`/focus?taskId=${firstPending.id}`)}>
+            Start focus
+          </button>
+        </section>
+      ) : null}
+
+      <section className="card">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Today's tasks</p>
+            <h3>{tasks.length === 0 ? 'Nothing queued' : `${doneTasks.length}/${tasks.length} complete`}</h3>
+          </div>
+          <span className="metric-chip">max 3</span>
+        </div>
+
+        {dailyComplete ? (
+          <div className="daily-complete-line">Daily requirement complete</div>
+        ) : requirement ? (
+          <p className="muted-copy">{requirement.minimumCopy}</p>
+        ) : null}
+
+        {visibleTasks.length === 0 ? (
+          <p className="muted-copy">
+            {projectFilter ? 'No tasks in this project today.' : 'Add up to 3 tasks and choose a tier for each one.'}
+          </p>
+        ) : (
+          <div className="stack">
+            {visibleTasks.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                project={projects.find((candidate) => candidate.id === task.projectId) ?? null}
+                onToggle={() => handleToggleTask(task)}
+                onFocus={() => navigate(`/focus?taskId=${task.id}`)}
+                onDrop={() => {
+                  if (window.confirm(`Drop "${task.title}"?`)) {
+                    mutate(() => db.dbDropTask(task.id));
+                  }
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        {tasks.length < DAILY_CAP ? (
+          <button className="secondary-button align-start" type="button" disabled={!activeGoal} onClick={() => setTaskModalOpen(true)}>
+            Add task
+          </button>
+        ) : (
+          <p className="muted-copy">Task cap reached for today.</p>
+        )}
+      </section>
+
+      <ProjectManagerModal
+        open={projectModalOpen}
+        projects={projects}
+        goalId={activeGoal?.id ?? null}
+        onClose={() => setProjectModalOpen(false)}
+      />
+      <TaskModal
+        open={taskModalOpen}
+        title="Add today's task"
+        projects={projects}
+        selectedProjectId={projectFilter}
+        onClose={() => setTaskModalOpen(false)}
+        onSubmit={(title, nextStep, projectId, tier) => {
+          const result = mutate(() =>
+            activeGoal
+              ? db.dbCreateTask(title, activeGoal.id, null, {
+                  nextStep,
+                  projectId,
+                  tier,
+                })
+              : { ok: false as const, reason: 'missing_goal' as const }
+          );
+
+          if (!result.ok) {
+            window.alert("Today's 3-task limit is already full.");
+          }
+        }}
+      />
+    </>
+  );
+}
+
 function CalendarPage() {
   const navigate = useNavigate();
   const today = todayString();
@@ -1969,13 +2321,14 @@ function CalendarPage() {
         projects={projects}
         selectedProjectId={null}
         onClose={() => setTaskModalOpen(false)}
-        onSubmit={(title, nextStep, projectId) => {
+        onSubmit={(title, nextStep, projectId, tier) => {
           const result = mutate(() =>
             activeGoal
               ? db.dbCreateTask(title, activeGoal.id, weeklyFocus?.id, {
                   date: selectedDate,
                   nextStep,
                   projectId,
+                  tier,
                 })
               : { ok: false as const, reason: 'missing_goal' as const }
           );
@@ -2301,6 +2654,234 @@ function GoalsPage() {
         }}
       />
     </>
+  );
+}
+
+function ActiveGoalSettingsPage() {
+  const activeGoal = useDataSnapshot(() => db.dbGetActiveGoal());
+  const defaultInput = useMemo(() => createDefaultGoalInput(), []);
+  const [title, setTitle] = useState(defaultInput.title);
+  const [whyItMatters, setWhyItMatters] = useState(defaultInput.whyItMatters ?? '');
+  const [startDate, setStartDate] = useState(defaultInput.startDate ?? todayString());
+  const [endDate, setEndDate] = useState(defaultInput.targetDate ?? '');
+  const [xpTarget, setXpTarget] = useState(String(defaultInput.xpTarget ?? 10000));
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!activeGoal) {
+      setTitle(defaultInput.title);
+      setWhyItMatters(defaultInput.whyItMatters ?? '');
+      setStartDate(defaultInput.startDate ?? todayString());
+      setEndDate(defaultInput.targetDate ?? '');
+      setXpTarget(String(defaultInput.xpTarget ?? 10000));
+      return;
+    }
+    setTitle(activeGoal.title);
+    setWhyItMatters(activeGoal.whyItMatters || activeGoal.anchorWhy || '');
+    setStartDate(activeGoal.startDate ?? todayString());
+    setEndDate(activeGoal.endDate ?? activeGoal.targetDate ?? '');
+    setXpTarget(String(activeGoal.xpTarget || 10000));
+    setSaved(false);
+  }, [activeGoal?.id, defaultInput]);
+
+  const input: GoalWriteInput = {
+    title: title.trim(),
+    targetOutcome: title.trim(),
+    targetDate: endDate || null,
+    metric: 'XP earned',
+    why: whyItMatters.trim(),
+    practicalReason: whyItMatters.trim(),
+    anchorWhy: whyItMatters.trim(),
+    description: title.trim(),
+    startDate,
+    whyItMatters: whyItMatters.trim(),
+    xpTarget: Number.parseInt(xpTarget, 10) || 0,
+  };
+
+  function saveGoal() {
+    if (!input.title) return;
+    if (activeGoal) {
+      mutate(() => db.dbUpdateGoal(activeGoal.id, input));
+    } else {
+      mutate(() => db.dbCreateGoal(input, { status: 'active' }));
+    }
+    setSaved(true);
+  }
+
+  function resetDefaultGoal() {
+    if (!window.confirm('Reset the active goal to the default template? The previous active goal will be completed, not deleted.')) {
+      return;
+    }
+    const created = mutate(() => db.dbCreateDefaultGoal());
+    if (created) setSaved(true);
+  }
+
+  return (
+    <>
+      <section className="page-header">
+        <div>
+          <p className="eyebrow">Goal</p>
+          <h2>Active goal configuration</h2>
+          <p className="muted-copy">One active goal drives the build, XP target, and inspections.</p>
+        </div>
+        <div className="header-actions">
+          <button className="secondary-button" type="button" onClick={resetDefaultGoal}>
+            Reset to default
+          </button>
+          <button className="primary-button" type="button" onClick={saveGoal} disabled={!title.trim()}>
+            {activeGoal ? 'Save goal' : 'Create active goal'}
+          </button>
+        </div>
+      </section>
+
+      <section className="goal-settings">
+        <div className="goal-settings-form">
+          <label className="field">
+            <span>Goal name</span>
+            <input value={title} onChange={(event) => setTitle(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>Why it matters</span>
+            <textarea value={whyItMatters} onChange={(event) => setWhyItMatters(event.target.value)} rows={4} />
+          </label>
+          <div className="two-column-fields">
+            <label className="field">
+              <span>Start date</span>
+              <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>End date</span>
+              <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+            </label>
+          </div>
+          <label className="field">
+            <span>XP target</span>
+            <input type="number" min="1" value={xpTarget} onChange={(event) => setXpTarget(event.target.value)} />
+          </label>
+          {saved ? <span className="metric-chip">Saved</span> : null}
+        </div>
+
+        <aside className="goal-settings-summary">
+          <p className="eyebrow">Starting template</p>
+          <h3>Phase 1 - Show Up</h3>
+          <div className="rule-list">
+            <span>Goal length: 12 months</span>
+            <span>XP target: 10,000 XP</span>
+            <span>Starting build health: 100</span>
+            <span>Starting difficulty: Phase 1</span>
+          </div>
+          {activeGoal ? (
+            <div className="inspection-metric">
+              <strong>{activeGoal.buildHealth}/100</strong>
+              <span>Current build health</span>
+            </div>
+          ) : null}
+        </aside>
+      </section>
+    </>
+  );
+}
+
+function getInspectionResultColor(result?: WeeklyInspection['result']) {
+  if (result === 'pass') return '#2f9e44';
+  if (result === 'fail') return '#e03131';
+  return '#e67700';
+}
+
+function WeeklyInspectionPage() {
+  const weekStart = getWeekStart();
+  const [inspection, setInspection] = useState<WeeklyInspection | null>(null);
+  const { activeGoal, stats, weekTasks } = useDataSnapshot(() => {
+    const activeGoal = db.dbGetActiveGoal();
+    return {
+      activeGoal,
+      stats: activeGoal ? db.dbGetGameStats(activeGoal.id) : null,
+      weekTasks: db.dbGetTasksForWeek(weekStart),
+    };
+  });
+  const weekEnd = useMemo(() => {
+    const [year, month, day] = weekStart.split('-').map(Number);
+    return formatDate(new Date(year, month - 1, day + 6));
+  }, [weekStart]);
+  const weekRows = (stats?.last7Days ?? []).filter((row) => row.date >= weekStart && row.date <= weekEnd);
+  const goalTasks = weekTasks.filter((task) => task.goalId === activeGoal?.id);
+  const xpEarned = inspection?.xpEarned ?? weekRows.reduce((sum, row) => sum + row.xpEarned, 0);
+  const tasksCompleted = inspection?.tasksCompleted ?? goalTasks.filter((task) => task.status === 'done').length;
+  const hardTasksCompleted =
+    inspection?.hardTasksCompleted ??
+    goalTasks.filter((task) => task.status === 'done' && (task.tier ?? 1) >= 3).length;
+  const validDays = inspection?.validDays ?? weekRows.filter((row) => row.met).length;
+  const healthChange = inspection?.buildHealthChange ?? 0;
+  const resultLabel = inspection?.result ? inspection.result.toUpperCase() : 'READY';
+  const resultColor = getInspectionResultColor(inspection?.result);
+
+  return (
+    <>
+      <section className="page-header">
+        <div>
+          <p className="eyebrow">Weekly inspection</p>
+          <h2>Active goal accountability</h2>
+          <p className="muted-copy">{formatShortDate(weekStart)} - {formatShortDate(weekEnd)}</p>
+        </div>
+        <div className="header-actions">
+          <button
+            className="primary-button"
+            type="button"
+            disabled={!activeGoal}
+            onClick={() => setInspection(mutate(() => db.dbRunWeeklyInspection(weekStart)))}
+          >
+            Run weekly inspection
+          </button>
+        </div>
+      </section>
+
+      {!activeGoal ? (
+        <section className="card empty-card">
+          <h3>No active goal</h3>
+          <p className="muted-copy">Configure one active goal before running an inspection.</p>
+          <Link className="secondary-button align-start" to="/goals">
+            Configure goal
+          </Link>
+        </section>
+      ) : (
+        <section className="inspection-layout">
+          <div className="inspection-main">
+            <p className="eyebrow">Result</p>
+            <strong style={{ color: resultColor }}>{resultLabel}</strong>
+            <p>{activeGoal.title}</p>
+            <span className="chip">Phase {activeGoal.difficultyPhase} - {stats?.dailyRequirement.phaseName ?? 'Show Up'}</span>
+          </div>
+
+          <div className="inspection-metrics">
+            <MetricBlock label="XP earned this week" value={String(xpEarned)} />
+            <MetricBlock label="Tasks completed" value={String(tasksCompleted)} />
+            <MetricBlock label="Hard tasks completed T3+" value={String(hardTasksCompleted)} />
+            <MetricBlock label="Daily requirement met" value={`${validDays}/5 days`} />
+            <MetricBlock label="Build health change" value={`${healthChange > 0 ? '+' : ''}${healthChange}`} />
+            <MetricBlock label="Build health" value={`${activeGoal.buildHealth}/100`} />
+          </div>
+
+          <section className="card">
+            <p className="eyebrow">Pass rules</p>
+            <div className="rule-list">
+              <span>Phase 1: at least 5 valid days</span>
+              <span>Phase 2: at least 5 valid days</span>
+              <span>Phase 3: at least 5 valid days and 1 T2+ task</span>
+              <span>Phase 4: at least 5 valid days and 1 T3+ task</span>
+            </div>
+          </section>
+        </section>
+      )}
+    </>
+  );
+}
+
+function MetricBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="inspection-metric">
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
   );
 }
 
@@ -2808,6 +3389,228 @@ function FocusPage() {
   );
 }
 
+const BUILD_PHASE_MARKERS = ['.', '/', '=', 'A', '#', '^', '[]', '::', '~~', 'M', '*'] as const;
+
+const BUILD_STATUS_LABELS: Record<GoalPerformanceStatus, string> = {
+  ahead: 'Ahead',
+  on_track: 'On track',
+  behind: 'Behind',
+  decaying: 'Decaying',
+};
+
+const BUILD_STATUS_COLORS: Record<GoalPerformanceStatus, string> = {
+  ahead: '#2f9e44',
+  on_track: '#3b5bdb',
+  behind: '#e67700',
+  decaying: '#e03131',
+};
+
+function BuildPage() {
+  const { goal, allTasks, stats } = useDataSnapshot(() => {
+    const activeGoal = db.dbGetActiveGoal();
+    return {
+      goal: activeGoal,
+      allTasks: db.dbGetAllTasks(),
+      stats: activeGoal ? db.dbGetGameStats(activeGoal.id) : null,
+    };
+  });
+
+  const today = todayString();
+
+  if (!goal) {
+    return (
+      <div className="page-content stack">
+        <p className="eyebrow">Build</p>
+        <p>Set an active goal to start building.</p>
+      </div>
+    );
+  }
+
+  const goalCreatedAt = goal.createdAt;
+  const goalTasks = allTasks.filter((t) => t.goalId === goal.id && t.status === 'done');
+  const totalXp = goal.xpTotal || stats?.totalXp || goalTasks.reduce((sum, t) => sum + TIER_XP[t.tier ?? 2], 0);
+  const daysSinceCreation = Math.floor((Date.now() - goalCreatedAt) / (24 * 60 * 60 * 1000));
+  const targetXp = goal.xpTarget || stats?.targetXp || Math.max(daysSinceCreation * TIER_XP[2], TIER_XP[2]);
+  const dailyRequirement = stats?.dailyRequirement ?? db.getDailyRequirement(goal);
+  const startDate = goal.startDate ?? new Date(goal.createdAt).toISOString().slice(0, 10);
+  const endDate = goal.endDate ?? goal.targetDate;
+  const calendarProgress = calculateCalendarProgress({ startDate, endDate });
+  const xpProgress = calculateXpProgress(totalXp, targetXp);
+  const buildHealth = goal.buildHealth ?? stats?.buildHealth ?? 100;
+  const phaseIndex = calculateBuildPhaseIndex(calendarProgress, xpProgress);
+  const phaseName = getBuildPhaseName(phaseIndex);
+  const decayLevel = getBuildDecayLevel(buildHealth);
+  const forecastStatus = calculateForecastStatus({
+    calendarProgress,
+    xpProgress,
+    buildHealth,
+    performanceStatus: goal.performanceStatus,
+  });
+  const nextUnlockRequirement = getNextUnlockRequirement({ phaseIndex, xpTotal: totalXp, xpTarget: targetXp });
+  const daysUntilCompletion = getDaysUntil(endDate);
+  const plannedCompletion = endDate ? formatShortDate(endDate) : 'No date set';
+  const healthColor = decayLevel === 'healthy' ? '#2f9e44' : decayLevel === 'decay' ? '#e67700' : '#e03131';
+  const buildCardStyle = {
+    padding: '1.5rem',
+    background: decayLevel === 'severe' ? '#fff5f5' : decayLevel === 'decay' ? '#fffbf2' : 'var(--surface, #f5f5f5)',
+    border: `1px solid ${decayLevel === 'severe' ? '#e03131' : decayLevel === 'decay' ? '#f08c00' : 'var(--border, #e0e0e0)'}`,
+    borderRadius: '0.75rem',
+  };
+  const forecastCopy =
+    forecastStatus === 'ahead'
+      ? 'Ahead of the build curve.'
+      : forecastStatus === 'behind'
+        ? 'Needs extra XP to catch the timeline.'
+        : forecastStatus === 'decaying'
+          ? 'Health is damaging the build.'
+          : 'Pace and build progress are aligned.';
+  const timelineCopy =
+    daysUntilCompletion === null
+      ? 'No completion date is set.'
+      : daysUntilCompletion < 0
+        ? `${Math.abs(daysUntilCompletion)} days past planned completion.`
+        : `${daysUntilCompletion} days until planned completion.`;
+
+  // Build last-7-days history
+  const last7: Array<{ date: string; xpEarned: number; expectation: number; met: boolean }> = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateStr = formatDate(d);
+    const dayExp = dailyRequirement.tasksRequired;
+    const dayXp = goalTasks
+      .filter((t) => t.date === dateStr)
+      .reduce((sum, t) => sum + TIER_XP[t.tier ?? 2], 0);
+    const dayTasks = allTasks.filter((t) => t.goalId === goal.id && t.date === dateStr && t.status === 'done');
+    last7.push({ date: dateStr, xpEarned: dayXp, expectation: dayExp, met: db.isValidDay(goal, dayTasks) });
+  }
+
+  // Compute streak and health from last-7-days (simple approximation for web)
+  let streak = 0;
+  for (let i = last7.length - 1; i >= 0; i--) {
+    const day = last7[i];
+    if (day.date === today && day.xpEarned === 0) continue; // don't break on today if not yet started
+    if (day.met) streak++;
+    else break;
+  }
+  return (
+    <div className="page-content stack">
+      <p className="eyebrow">Build</p>
+      <div style={buildCardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
+          <div>
+            <p className="eyebrow" style={{ marginBottom: '0.35rem' }}>Flagship build</p>
+            <h2 style={{ margin: 0 }}>{goal.title}</h2>
+          </div>
+          <span style={{ color: BUILD_STATUS_COLORS[forecastStatus], border: `1px solid ${BUILD_STATUS_COLORS[forecastStatus]}`, borderRadius: '999px', padding: '0.35rem 0.7rem', fontSize: '0.8rem', fontWeight: 800, background: '#fff' }}>
+            {BUILD_STATUS_LABELS[forecastStatus]}
+          </span>
+        </div>
+
+        <div style={{ marginTop: '1rem', padding: '1rem', border: '1px solid var(--border, #e0e0e0)', borderRadius: '0.75rem', background: '#fff' }}>
+          {decayLevel !== 'healthy' ? (
+            <div style={{ color: decayLevel === 'severe' ? '#e03131' : '#c05621', border: `1px solid ${decayLevel === 'severe' ? '#ffc9c9' : '#ffd8a8'}`, background: decayLevel === 'severe' ? '#fff5f5' : '#fff4e6', borderRadius: '0.6rem', padding: '0.55rem 0.7rem', marginBottom: '0.75rem', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Build health damaged
+            </div>
+          ) : null}
+          <p className="eyebrow" style={{ marginBottom: '0.35rem' }}>Current build phase</p>
+          <div style={{ fontWeight: 800, fontSize: '1.25rem', marginBottom: '0.75rem' }}>Phase {phaseIndex}: {phaseName}</div>
+          <pre style={{ margin: 0, minHeight: '7rem', display: 'grid', placeItems: 'center', fontSize: '1.1rem', lineHeight: 1.1, fontWeight: 800, background: 'var(--bg, #f8f7f4)', borderRadius: '0.6rem' }}>
+{`${phaseIndex < 2 ? '          ' : '    /\\    '}
+${phaseIndex < 3 ? '          ' : '   /  \\   '}
+${phaseIndex < 4 ? '          ' : '  /____\\  '}
+${phaseIndex < 5 ? '          ' : ' | [] [] | '}
+${phaseIndex < 7 ? '          ' : ' |  __  | '}
+${phaseIndex < 1 ? '__________' : '_|______|_'}`}
+          </pre>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${BUILD_PHASES.length}, minmax(0, 1fr))`, gap: '0.35rem', marginTop: '0.8rem' }}>
+            {BUILD_PHASES.map((phase, index) => (
+              <span
+                key={phase}
+                title={`Phase ${index}: ${phase}`}
+                style={{
+                  display: 'grid',
+                  placeItems: 'center',
+                  height: '1.75rem',
+                  borderRadius: '0.5rem',
+                  border: `1px solid ${index === phaseIndex ? '#3b5bdb' : index <= phaseIndex ? '#c7d2fe' : 'var(--border, #e0e0e0)'}`,
+                  color: index <= phaseIndex ? '#3b5bdb' : 'var(--text-muted, #888)',
+                  background: index <= phaseIndex ? '#eef2ff' : '#fff',
+                  fontSize: '0.7rem',
+                  fontWeight: 800,
+                }}
+              >
+                {BUILD_PHASE_MARKERS[index]}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gap: '0.75rem', marginTop: '1rem' }}>
+          {[
+            ['Calendar progress', `${Math.round(calendarProgress * 100)}% complete`, calendarProgress, '#3b5bdb'],
+            ['XP progress', `${totalXp} / ${targetXp} XP`, xpProgress, '#7950f2'],
+            ['Build health', `${buildHealth}/100`, Math.max(0, Math.min(100, buildHealth)) / 100, healthColor],
+          ].map(([label, value, progress, color]) => (
+            <div key={label as string}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted, #888)', marginBottom: '0.25rem', fontWeight: 700 }}>
+                <span>{label as string}</span>
+                <span>{value as string}</span>
+              </div>
+              <div style={{ height: '8px', background: 'var(--border, #e0e0e0)', borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${(progress as number) * 100}%`, background: color as string, borderRadius: '4px' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(14rem, 1fr))', gap: '0.75rem', marginTop: '1rem' }}>
+          <div style={{ padding: '0.85rem', background: 'var(--bg, #f8f7f4)', borderRadius: '0.65rem' }}>
+            <p className="eyebrow" style={{ marginBottom: '0.35rem' }}>Next unlock</p>
+            <strong>{nextUnlockRequirement}</strong>
+          </div>
+          <div style={{ padding: '0.85rem', background: 'var(--bg, #f8f7f4)', borderRadius: '0.65rem' }}>
+            <p className="eyebrow" style={{ marginBottom: '0.35rem' }}>Planned completion</p>
+            <strong>{plannedCompletion}</strong>
+          </div>
+          <div style={{ padding: '0.85rem', background: 'var(--bg, #f8f7f4)', borderRadius: '0.65rem' }}>
+            <p className="eyebrow" style={{ marginBottom: '0.35rem' }}>Current forecast</p>
+            <strong>{forecastCopy} {timelineCopy}</strong>
+          </div>
+          <div style={{ padding: '0.85rem', background: 'var(--bg, #f8f7f4)', borderRadius: '0.65rem', textAlign: 'center' }}>
+            <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{streak}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>day streak</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p className="eyebrow">Last 7 days · {dailyRequirement.minimumCopy}</p>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {last7.map((day) => (
+            <div key={day.date} style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: '1rem' }}>{day.met ? '●' : day.xpEarned > 0 ? '◐' : '○'}</div>
+              <div style={{ fontSize: '0.6rem', color: 'var(--text-muted, #888)' }}>{day.date.slice(5)}</div>
+              <div style={{ fontSize: '0.65rem', fontWeight: 600 }}>{day.xpEarned}xp</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: '1rem', background: 'var(--surface, #f5f5f5)', borderRadius: '0.75rem' }}>
+        <p className="eyebrow" style={{ marginBottom: '0.5rem' }}>Tier guide</p>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {([1, 2, 3, 4, 5] as TaskTier[]).map((t) => (
+            <span key={t} style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem', borderRadius: '999px', border: '1px solid var(--border, #ccc)' }}>
+              T{t} · {TIER_XP[t]}xp
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RequireOnboarding({ onboardingComplete }: { onboardingComplete: boolean }) {
   return onboardingComplete ? <Outlet /> : <Navigate to="/onboarding" replace />;
 }
@@ -2829,8 +3632,10 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route path="/today" element={<TodayPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
-          <Route path="/goals" element={<GoalsPage />} />
+          <Route path="/goals" element={<ActiveGoalSettingsPage />} />
           <Route path="/review" element={<ReviewPage />} />
+          <Route path="/inspection" element={<WeeklyInspectionPage />} />
+          <Route path="/build" element={<BuildPage />} />
         </Route>
         <Route path="/focus" element={<FocusPage />} />
       </Route>

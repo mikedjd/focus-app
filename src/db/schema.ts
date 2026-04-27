@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'focus.db';
 const SCHEMA_VERSION_KEY = 'schema_version';
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 12;
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
@@ -71,6 +71,18 @@ const migrations: Migration[] = [
     version: 10,
     run: (db) => {
       ensureLifeArchitectureShape(db);
+    },
+  },
+  {
+    version: 11,
+    run: (db) => {
+      ensureGamificationShape(db);
+    },
+  },
+  {
+    version: 12,
+    run: (db) => {
+      ensureGoalProjectShape(db);
     },
   },
 ];
@@ -150,6 +162,8 @@ function runMigrations(db: SQLite.SQLiteDatabase): void {
   ensureControlCenterShape(db);
   ensurePlannerShape(db);
   ensureLifeArchitectureShape(db);
+  ensureGamificationShape(db);
+  ensureGoalProjectShape(db);
 
   if (getSchemaVersion(db) < CURRENT_SCHEMA_VERSION) {
     setSchemaVersion(db, CURRENT_SCHEMA_VERSION);
@@ -619,6 +633,197 @@ function ensureLifeArchitectureShape(db: SQLite.SQLiteDatabase): void {
       CREATE INDEX IF NOT EXISTS idx_projects_goal_id ON projects(goal_id);
     `);
   }
+}
+
+function ensureGamificationShape(db: SQLite.SQLiteDatabase): void {
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'tier',
+    'ALTER TABLE daily_tasks ADD COLUMN tier INTEGER NOT NULL DEFAULT 2'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'total_xp',
+    'ALTER TABLE goals ADD COLUMN total_xp INTEGER NOT NULL DEFAULT 0'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'current_streak',
+    'ALTER TABLE goals ADD COLUMN current_streak INTEGER NOT NULL DEFAULT 0'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'streak_date',
+    "ALTER TABLE goals ADD COLUMN streak_date TEXT NOT NULL DEFAULT ''"
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'health_score',
+    'ALTER TABLE goals ADD COLUMN health_score INTEGER NOT NULL DEFAULT 100'
+  );
+
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS daily_xp (
+      id TEXT PRIMARY KEY,
+      goal_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      xp_earned INTEGER NOT NULL DEFAULT 0,
+      expectation INTEGER NOT NULL DEFAULT 0,
+      met INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(goal_id, date),
+      FOREIGN KEY (goal_id) REFERENCES goals(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_xp_goal_date
+      ON daily_xp(goal_id, date DESC);
+  `);
+}
+
+function ensureGoalProjectShape(db: SQLite.SQLiteDatabase): void {
+  ensureColumn(
+    db,
+    'goals',
+    'description',
+    "ALTER TABLE goals ADD COLUMN description TEXT NOT NULL DEFAULT ''"
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'start_date',
+    'ALTER TABLE goals ADD COLUMN start_date TEXT'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'end_date',
+    'ALTER TABLE goals ADD COLUMN end_date TEXT'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'why_it_matters',
+    "ALTER TABLE goals ADD COLUMN why_it_matters TEXT NOT NULL DEFAULT ''"
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'xp_target',
+    'ALTER TABLE goals ADD COLUMN xp_target INTEGER NOT NULL DEFAULT 0'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'build_health',
+    'ALTER TABLE goals ADD COLUMN build_health INTEGER NOT NULL DEFAULT 100'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'current_phase',
+    'ALTER TABLE goals ADD COLUMN current_phase INTEGER NOT NULL DEFAULT 1'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'difficulty_phase',
+    'ALTER TABLE goals ADD COLUMN difficulty_phase INTEGER NOT NULL DEFAULT 1'
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'last_completed_date',
+    "ALTER TABLE goals ADD COLUMN last_completed_date TEXT NOT NULL DEFAULT ''"
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'performance_status',
+    "ALTER TABLE goals ADD COLUMN performance_status TEXT NOT NULL DEFAULT 'on_track'"
+  );
+  ensureColumn(
+    db,
+    'goals',
+    'updated_at',
+    'ALTER TABLE goals ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0'
+  );
+
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'linked_site',
+    'ALTER TABLE daily_tasks ADD COLUMN linked_site TEXT'
+  );
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'is_recovery_task',
+    'ALTER TABLE daily_tasks ADD COLUMN is_recovery_task INTEGER NOT NULL DEFAULT 0'
+  );
+  ensureColumn(
+    db,
+    'daily_tasks',
+    'updated_at',
+    'ALTER TABLE daily_tasks ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0'
+  );
+
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS weekly_inspections (
+      id TEXT PRIMARY KEY,
+      goal_id TEXT NOT NULL,
+      week_start TEXT NOT NULL,
+      week_end TEXT NOT NULL,
+      xp_earned INTEGER NOT NULL DEFAULT 0,
+      tasks_completed INTEGER NOT NULL DEFAULT 0,
+      hard_tasks_completed INTEGER NOT NULL DEFAULT 0,
+      valid_days INTEGER NOT NULL DEFAULT 0,
+      health_change INTEGER NOT NULL DEFAULT 0,
+      result TEXT NOT NULL DEFAULT 'partial',
+      recovery_task_created INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      UNIQUE(goal_id, week_start),
+      FOREIGN KEY (goal_id) REFERENCES goals(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_weekly_inspections_goal_week
+      ON weekly_inspections(goal_id, week_start DESC);
+
+    UPDATE goals
+    SET end_date = target_date
+    WHERE end_date IS NULL AND target_date IS NOT NULL;
+
+    UPDATE goals
+    SET why_it_matters = COALESCE(NULLIF(anchor_why, ''), why)
+    WHERE TRIM(COALESCE(why_it_matters, '')) = '';
+
+    UPDATE goals
+    SET build_health = health_score
+    WHERE build_health = 100 AND health_score != 100;
+
+    UPDATE goals
+    SET updated_at = created_at
+    WHERE updated_at IS NULL OR updated_at = 0;
+
+    UPDATE daily_tasks
+    SET updated_at = COALESCE(completed_at, created_at)
+    WHERE updated_at IS NULL OR updated_at = 0;
+  `);
+
+  ensureColumn(
+    db,
+    'weekly_inspections',
+    'valid_days',
+    'ALTER TABLE weekly_inspections ADD COLUMN valid_days INTEGER NOT NULL DEFAULT 0'
+  );
+  ensureColumn(
+    db,
+    'weekly_inspections',
+    'health_change',
+    'ALTER TABLE weekly_inspections ADD COLUMN health_change INTEGER NOT NULL DEFAULT 0'
+  );
 }
 
 function ensureColumn(
