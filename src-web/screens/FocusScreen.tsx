@@ -93,14 +93,14 @@ export function FocusScreen() {
       <main className="grid min-h-screen place-items-center bg-gradient-to-b from-focus-top to-focus-bottom px-7 py-7 text-paper">
         <div className="max-w-xl text-center">
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-sienna-soft">
-            no row yet
+            no active piece yet
           </p>
-          <h1 className="mt-4 font-display text-[56px] leading-none">Plant one row first.</h1>
+          <h1 className="mt-4 font-display text-[56px] leading-none">Put one piece on the board first.</h1>
           <p className="mt-4 text-[15px] leading-7 text-paper/70">
-            The focus room opens once there is a real task to tend.
+            The studio opens once there is one load-bearing task on the board.
           </p>
           <Button className="mt-7" onClick={() => navigate('/')}>
-            Back to Today
+            Back to Board
           </Button>
         </div>
       </main>
@@ -121,14 +121,14 @@ export function FocusScreen() {
           ×
         </button>
         <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-paper/70">
-          tending · {elapsedLabel} elapsed
+          studio · {elapsedLabel} elapsed
         </p>
       </div>
 
       <section className="mx-auto grid min-h-[calc(100vh-96px)] max-w-[1280px] items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_520px]">
         <div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-sienna-soft">
-            ✦ The one row · cycle {Math.min(task.cyclesDone + 1, task.totalCycles)} of {task.totalCycles} · {task.xpValue ?? DEFAULT_TASK_XP} XP
+            ✦ Load-bearing task · cycle {Math.min(task.cyclesDone + 1, task.totalCycles)} of {task.totalCycles} · {task.xpValue ?? DEFAULT_TASK_XP} XP
           </p>
           <h1 className="mt-4 max-w-3xl font-display text-[52px] leading-[0.98] tracking-[-0.02em] md:text-[64px]">
             {task.title}{' '}
@@ -150,7 +150,7 @@ export function FocusScreen() {
                 navigate('/');
               }}
             >
-              ✓ It's done — close the row
+              ✓ It's placed — close the task
             </Button>
             <Button
               variant="quiet"
@@ -159,7 +159,7 @@ export function FocusScreen() {
                 navigate('/');
               }}
             >
-              Step away on purpose
+              Leave a site note
             </Button>
           </div>
         </div>

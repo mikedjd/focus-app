@@ -36,13 +36,13 @@ function GoalSetupForm() {
   return (
     <div className="mx-auto max-w-compost">
       <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-        the trail · empty
+        blueprint · empty
       </p>
       <h1 className="mt-3 font-display text-[72px] leading-none tracking-[-0.02em] text-ink lg:text-[88px]">
-        Plant the patch.
+        Draw the blueprint.
       </h1>
       <p className="mt-4 max-w-2xl font-display text-[20px] italic leading-8 text-ink-soft">
-        Add your actual goal. You can refine the milestones later.
+        Add the structure you are designing toward. You can refine the checkpoints later.
       </p>
 
       <form onSubmit={handleSubmit} className="mt-9 grid gap-4 rounded-[20px] border border-rule bg-paper p-7 shadow-soft">
@@ -50,19 +50,19 @@ function GoalSetupForm() {
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[16px] text-ink outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Goal title"
+          placeholder="Blueprint title"
         />
         <input
           value={target}
           onChange={(event) => setTarget(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] text-ink outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Target outcome"
+          placeholder="Designed outcome"
         />
         <input
           value={harvestBy}
           onChange={(event) => setHarvestBy(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] text-ink outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Harvest by"
+          placeholder="Target date"
         />
         <label className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] text-ink focus-within:border-sienna">
           <span className="mb-2 block font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-ink-muted">
@@ -121,7 +121,7 @@ export function GoalScreen() {
   return (
     <div className="mx-auto max-w-garden">
       <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-        the trail · started {goal.startedAt}
+        blueprint · started {goal.startedAt}
       </p>
       <h1 className="mt-3 font-display text-[72px] leading-none tracking-[-0.02em] text-ink lg:text-[88px]">
         {goal.title}
@@ -142,7 +142,7 @@ export function GoalScreen() {
               “{goal.whyQuote}”
             </blockquote>
           ) : (
-            <p className="mt-4 text-[15px] leading-7 text-ink-soft">Add a why line when this starts to blur.</p>
+            <p className="mt-4 text-[15px] leading-7 text-ink-soft">Add the design intent when this starts to blur.</p>
           )}
           <div className="my-7 border-t border-dashed border-rule" />
           <div className="grid gap-6 md:grid-cols-2">

@@ -5,19 +5,19 @@ export const phases: Phase[] = [
     id: 'deep',
     label: 'Deep',
     window: '8:30-11:30',
-    note: 'the quiet row',
+    note: 'load-bearing',
   },
   {
     id: 'admin',
     label: 'Body & admin',
     window: '12:30-3:00',
-    note: 'small stones',
+    note: 'site services',
   },
   {
     id: 'creative',
     label: 'Creative',
     window: '3:30-5:30',
-    note: 'loose soil',
+    note: 'drafting',
   },
 ];
 

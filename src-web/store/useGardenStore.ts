@@ -116,11 +116,11 @@ export const useGardenStore = create<GardenState>()(
       buildHealth: 100,
       buildStage: 1,
       milestones: [
-        { id: 'm1', label: 'First clear milestone', date: startedAt, state: 'up-next' },
+        { id: 'm1', label: 'First structural checkpoint', date: startedAt, state: 'up-next' },
         { id: 'm2', label: 'Second milestone', date: '', state: 'future' },
         { id: 'm3', label: 'Third milestone', date: '', state: 'future' },
         { id: 'm4', label: 'Fourth milestone', date: '', state: 'future' },
-        { id: 'm5', label: 'Harvest', date: input.harvestBy.trim(), state: 'future' },
+        { id: 'm5', label: 'Handoff point', date: input.harvestBy.trim(), state: 'future' },
       ],
     };
 
@@ -200,7 +200,7 @@ export const useGardenStore = create<GardenState>()(
       activeSession: null,
       resumeState: state.currentTaskId ? {
         taskId: state.currentTaskId,
-        note: state.tasks.find((task) => task.id === state.currentTaskId)?.lastNote ?? 'Step away on purpose.',
+        note: state.tasks.find((task) => task.id === state.currentTaskId)?.lastNote ?? 'Paused with context.',
         timestampLabel: 'just now',
       } : null,
     })),
@@ -263,8 +263,8 @@ export const useGardenStore = create<GardenState>()(
       const task: Task = {
         id: `task-${Date.now()}`,
         title: item.body,
-        description: 'Pulled from the heap. Give it one clean next action before tending.',
-        why: 'Captured thoughts become useful once they have a small handle.',
+        description: 'Pulled from the drafting table. Give it one clean next action before starting.',
+        why: 'Loose thoughts become usable once they have a clear line.',
         phaseId: state.activePhase,
         cyclesDone: 0,
         totalCycles: 1,

@@ -40,13 +40,13 @@ function FirstTaskForm() {
   return (
     <form onSubmit={handleSubmit} className="rounded-[20px] border border-rule bg-paper p-7 shadow-soft lg:p-8">
       <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-sienna">
-        ✦ The one row
+        ✦ Load-bearing task
       </p>
       <h2 className="max-w-3xl font-display text-[42px] leading-none tracking-[-0.02em] text-ink lg:text-[48px]">
-        Plant your first row.
+        Put the first piece on the board.
       </h2>
       <p className="mt-4 max-w-2xl text-[16px] leading-7 text-ink-soft">
-        Add the next real task you want to tend. Keep it small enough that starting feels believable.
+        Add the next piece that would make the structure stronger. Keep it small enough that starting feels believable.
       </p>
 
       <div className="mt-7 grid gap-4">
@@ -54,7 +54,7 @@ function FirstTaskForm() {
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[16px] text-ink outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Task title"
+          placeholder="Load-bearing task"
         />
         <textarea
           value={description}
@@ -96,7 +96,7 @@ function FirstTaskForm() {
       </div>
 
       <Button className="mt-7" type="submit">
-        Add row
+        Add to board
       </Button>
     </form>
   );
@@ -119,7 +119,7 @@ export function TodayScreen() {
             Good morning.
           </h1>
           <p className="mt-4 max-w-[580px] font-display text-[22px] italic leading-8 text-ink-soft">
-            Blank soil. One row today. The others can wait.
+            The board is clear. One load-bearing task today. The rest can wait.
           </p>
         </section>
 

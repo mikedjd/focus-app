@@ -30,7 +30,7 @@ export function PhaseColumns() {
 
             <div className="space-y-3">
               {phaseTasks.length === 0 ? (
-                <p className="py-2 text-[13px] italic text-ink-muted">Nothing planted here yet.</p>
+                <p className="py-2 text-[13px] italic text-ink-muted">Nothing on this board yet.</p>
               ) : null}
               {phaseTasks.map((task) => (
                 <button
@@ -49,7 +49,7 @@ export function PhaseColumns() {
                   </span>
                   {task.status === 'tending' ? (
                     <span className="rounded-full bg-sienna px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.12em] text-paper">
-                      tending
+                      active
                     </span>
                   ) : null}
                 </button>

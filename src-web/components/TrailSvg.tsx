@@ -18,7 +18,7 @@ export function TrailSvg({ goal }: TrailSvgProps) {
 
   return (
     <div className="overflow-hidden rounded-[20px] border border-rule bg-paper p-4">
-      <svg viewBox="0 0 1100 340" className="h-[360px] w-full" role="img" aria-label="Goal trail">
+      <svg viewBox="0 0 1100 340" className="h-[360px] w-full" role="img" aria-label="Goal roadmap">
         <path
           d="M 88 230 C 190 45, 305 74, 270 122 C 223 196, 390 294, 505 196 C 642 78, 681 38, 742 92 C 822 162, 912 237, 1010 168"
           fill="none"

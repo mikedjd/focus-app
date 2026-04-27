@@ -45,7 +45,7 @@ export function OneRowCard({ task }: OneRowCardProps) {
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-center">
         <div>
           <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-sienna">
-            ✦ The one row · Phase 1 · {phase?.label}
+            ✦ Load-bearing task · Phase 1 · {phase?.label}
           </p>
           <h2 className="max-w-3xl font-display text-[42px] leading-[0.98] tracking-[-0.02em] text-ink lg:text-[48px]">
             {task.title}{' '}
@@ -60,9 +60,9 @@ export function OneRowCard({ task }: OneRowCardProps) {
                 navigate('/focus');
               }}
             >
-              Brain on. Go →
+              Enter studio →
             </Button>
-            <Button variant="ghost">Pick a different row</Button>
+            <Button variant="ghost">Choose another piece</Button>
           </div>
         </div>
 
@@ -72,7 +72,7 @@ export function OneRowCard({ task }: OneRowCardProps) {
             <div>
               cycle {task.cyclesDone + 1} of {task.totalCycles}
             </div>
-            <div>{task.estimateMinutes} min floor</div>
+            <div>{task.estimateMinutes} min baseline</div>
             <div>{task.xpValue ?? DEFAULT_TASK_XP} XP</div>
           </div>
         </div>

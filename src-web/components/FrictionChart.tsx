@@ -9,12 +9,12 @@ export function FrictionChart({ history }: FrictionChartProps) {
     return (
       <section className="rounded-[20px] border border-rule bg-paper p-7">
         <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-leaf">
-          ✦ Friction floor
+          ✦ Friction baseline
         </p>
         <div className="mt-4 rounded-2xl border border-dashed border-rule bg-bg p-8">
-          <p className="font-display text-[28px] italic text-ink">No climb yet.</p>
+          <p className="font-display text-[28px] italic text-ink">No baseline yet.</p>
           <p className="mt-2 max-w-xl text-[14px] leading-6 text-ink-soft">
-            Finish a focus row and the floor starts tracking here.
+            Finish a studio session and your baseline starts tracking here.
           </p>
         </div>
       </section>
@@ -40,19 +40,19 @@ export function FrictionChart({ history }: FrictionChartProps) {
       <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-leaf">
-            ✦ Friction floor
+            ✦ Friction baseline
           </p>
           <div className="mt-2 flex items-baseline gap-4">
             <span className="font-display text-[64px] leading-none text-sienna">{history.at(-1)}</span>
-            <span className="font-display text-xl italic text-ink-soft">minutes the chair holds you</span>
+            <span className="font-display text-xl italic text-ink-soft">minutes the structure held</span>
           </div>
         </div>
         <div className="max-w-md text-right">
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-            21 days · sown Apr 9
+            21 entries · focus baseline
           </p>
           <p className="mt-2 font-display text-[17px] italic text-ink-soft">
-            Started at 18 minutes. Today the climb is visible.
+            Started at 18 minutes. Today the structure is visible.
           </p>
         </div>
       </div>

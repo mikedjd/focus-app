@@ -36,10 +36,10 @@ export function BrainDumpScreen() {
   return (
     <div className="mx-auto max-w-compost">
       <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-        compost · {visibleItems.length} in the pile
+        drafting table · {visibleItems.length} loose
       </p>
       <h1 className="mt-3 max-w-4xl font-display text-[64px] leading-none tracking-[-0.02em] text-ink lg:text-[76px]">
-        Out of the head, onto the heap.
+        Out of your head, onto the drafting table.
       </h1>
 
       <form
@@ -53,7 +53,7 @@ export function BrainDumpScreen() {
           onChange={(event) => setDraft(event.target.value)}
           autoFocus
           className="min-w-0 flex-1 bg-transparent font-display text-[26px] italic text-ink outline-none placeholder:text-ink-muted"
-          placeholder="Drop the thought. We'll compost it later."
+          placeholder="Drop the thought. We will place it later."
         />
         <button className="shrink-0 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-ink-muted">
           ↵ drop
@@ -75,7 +75,7 @@ export function BrainDumpScreen() {
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Button variant="ink" className="px-3 py-1.5 text-[11px]" onClick={() => convertBrainDumpToTask(item.id)}>
-                → task
+                → piece
               </Button>
               <Button variant="ghost" className="px-3 py-1.5 text-[11px]" onClick={() => parkBrainDumpItem(item.id)}>
                 → park
@@ -89,7 +89,7 @@ export function BrainDumpScreen() {
       </section>
 
       <p className="mt-10 font-display text-[20px] italic text-ink-soft">
-        Triage takes ten minutes at the end of phase 3 — not now. Let it sit.
+        Placement takes ten minutes at the end of phase 3 — not now. Let it sit.
       </p>
     </div>
   );
