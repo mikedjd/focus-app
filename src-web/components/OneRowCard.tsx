@@ -45,7 +45,7 @@ export function OneRowCard({ task }: OneRowCardProps) {
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-center">
         <div>
           <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-sienna">
-            ✦ Load-bearing task · Phase 1 · {phase?.label}
+            ✦ Up next · {phase?.label}
           </p>
           <h2 className="max-w-3xl font-display text-[42px] leading-[0.98] tracking-[-0.02em] text-ink lg:text-[48px]">
             {task.title}{' '}
@@ -60,9 +60,9 @@ export function OneRowCard({ task }: OneRowCardProps) {
                 navigate('/focus');
               }}
             >
-              Enter studio →
+              Start focus session →
             </Button>
-            <Button variant="ghost">Choose another piece</Button>
+            <Button variant="ghost">Choose another task</Button>
           </div>
         </div>
 

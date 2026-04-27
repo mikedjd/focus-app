@@ -16,20 +16,20 @@ export function Sidebar() {
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   const navItems = [
-    { to: '/', label: 'Board', note: String(tasks.filter((task) => task.status !== 'done').length) },
-    { to: '/goal', label: 'Blueprint', note: goal.title ? 'set' : 'empty' },
+    { to: '/', label: 'Tasks', note: String(tasks.filter((task) => task.status !== 'done').length) },
+    { to: '/goal', label: 'Goal', note: goal.title ? 'set' : 'empty' },
     { to: '/brain-dump', label: 'Drafts', note: visibleBrainDumpCount ? String(visibleBrainDumpCount) : 'cmd-K' },
     { to: '/habits', label: 'Habits', note: String(habits.filter((habit) => habit.status !== 'archived').length) },
     { to: '/calendar', label: 'Calendar', note: 'soon' },
-    { to: '/review', label: 'Review', note: 'soon' },
+    { to: '/review', label: 'Review', note: 'weekly' },
   ];
 
   return (
     <aside className="sticky top-0 flex h-screen w-[244px] shrink-0 flex-col justify-between border-r border-rule bg-bg px-[22px] py-8">
       <div>
         <div className="mb-10">
-          <div className="font-display text-4xl leading-none text-sienna">Architect</div>
-          <div className="mt-1 font-display text-[12px] italic text-ink-soft">design the life you're building</div>
+          <div className="font-display text-4xl leading-none text-sienna">Focus</div>
+          <div className="mt-1 font-display text-[12px] italic text-ink-soft">your daily planning tool</div>
           <div className="mt-3">
             {editingName ? (
               <form
@@ -88,13 +88,13 @@ export function Sidebar() {
 
       <section className="rounded-2xl border border-rule bg-paper p-5">
         <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-          Blueprint
+          Goal
         </p>
         <h2 className="font-display text-[22px] leading-tight text-ink">
-          {goal.title || 'No blueprint set yet'}
+          {goal.title || 'No goal set yet'}
         </h2>
         <p className="mt-3 text-[12px] leading-5 text-ink-soft">
-          {goal.title ? `started ${goal.sownDaysAgo} days ago · target ${goal.harvestBy || 'not set'}` : 'Set your blueprint on the Goal screen.'}
+          {goal.title ? `started ${goal.sownDaysAgo} days ago · target ${goal.harvestBy || 'not set'}` : 'Set your goal on the Goal screen.'}
         </p>
         <p className="mt-3 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-sienna">
           {(goal.xpTotal ?? 0)} / {(goal.xpTarget ?? 300)} XP

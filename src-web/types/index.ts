@@ -31,6 +31,7 @@ export interface Task {
   status: TaskStatus;
   lastNote?: string;
   scheduledTime?: string;
+  date?: string; // YYYY-MM-DD
 }
 
 export interface Milestone {

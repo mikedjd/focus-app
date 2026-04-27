@@ -83,6 +83,7 @@ export interface TaskInput {
   estimateMinutes: number;
   xpValue: number;
   scheduledTime?: string;
+  date?: string;
 }
 
 export interface HabitInput {
@@ -158,6 +159,7 @@ export const useGardenStore = create<GardenState>()(
     });
   },
   addTask: (input) => {
+    const today = new Date().toISOString().slice(0, 10);
     const task: Task = {
       id: `task-${Date.now()}`,
       title: input.title.trim(),
@@ -170,6 +172,7 @@ export const useGardenStore = create<GardenState>()(
       xpValue: input.xpValue,
       status: 'idle',
       scheduledTime: input.scheduledTime,
+      date: input.date ?? today,
     };
 
     set((state) => ({

@@ -24,7 +24,7 @@ function HabitForm() {
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!title.trim() || !tinyAction.trim() || !anchor.trim()) return;
+    if (!title.trim()) return;
 
     addHabit({
       title,
@@ -52,11 +52,11 @@ function HabitForm() {
   return (
     <form onSubmit={handleSubmit} className="rounded-[20px] border border-rule bg-paper p-7 shadow-soft">
       <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-sienna">
-        habit architecture
+        new habit
       </p>
-      <h2 className="mt-2 font-display text-[38px] leading-none text-ink">Design a routine that can survive low motivation.</h2>
+      <h2 className="mt-2 font-display text-[38px] leading-none text-ink">Build a habit that sticks.</h2>
       <p className="mt-4 max-w-3xl text-[15px] leading-7 text-ink-soft">
-        Strong habits start tiny, attach to a stable cue, happen in a predictable context, and end with a small signal of completion.
+        The best habits are small, triggered by something you already do, and tied to a specific place.
       </p>
 
       <div className="mt-7 grid gap-4 lg:grid-cols-2">
@@ -64,43 +64,43 @@ function HabitForm() {
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Habit name"
+          placeholder="What's the habit? e.g. Morning walk"
         />
         <input
           value={identity}
           onChange={(event) => setIdentity(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Identity it supports"
+          placeholder="Who does this make you? e.g. Someone who moves daily"
         />
         <input
           value={anchor}
           onChange={(event) => setAnchor(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="After I..."
+          placeholder="What triggers it? e.g. After I pour my coffee"
         />
         <input
           value={tinyAction}
           onChange={(event) => setTinyAction(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="I will..."
+          placeholder="What's the action? e.g. Do 5 push-ups"
         />
         <input
           value={location}
           onChange={(event) => setLocation(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Where this happens"
+          placeholder="Where? e.g. Kitchen, gym, desk"
         />
         <input
           value={frictionCut}
           onChange={(event) => setFrictionCut(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Make it easier by..."
+          placeholder="How to remove obstacles? e.g. Put trainers by the door"
         />
         <input
           value={celebration}
           onChange={(event) => setCelebration(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Completion signal"
+          placeholder="Mini-celebration? e.g. Fist pump, tick it off"
         />
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-rule bg-bg px-5 py-4">
           {(['daily', 'weekdays', 'custom'] as HabitCadence[]).map((option) => (
@@ -130,7 +130,7 @@ function HabitForm() {
       </div>
 
       <Button className="mt-7" type="submit">
-        Add routine
+        Add habit
       </Button>
     </form>
   );
@@ -163,23 +163,23 @@ function HabitCard({ habit }: { habit: Habit }) {
           onClick={() => completeHabit(habit.id)}
           disabled={doneToday || habit.status !== 'active'}
         >
-          {doneToday ? 'Placed today' : 'Mark placed'}
+          {doneToday ? 'Done today' : 'Mark done'}
         </Button>
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-rule bg-bg p-4">
           <p className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-            If-then plan
+            Trigger & action
           </p>
           <p className="mt-2 text-[14px] leading-6 text-ink-soft">
-            After <span className="font-semibold text-ink">{habit.anchor}</span>, I will{' '}
-            <span className="font-semibold text-ink">{habit.tinyAction}</span>.
+            After <span className="font-semibold text-ink">{habit.anchor || '—'}</span>, I will{' '}
+            <span className="font-semibold text-ink">{habit.tinyAction || '—'}</span>.
           </p>
         </div>
         <div className="rounded-2xl border border-rule bg-bg p-4">
           <p className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-            Site prep
+            Context
           </p>
           <p className="mt-2 text-[14px] leading-6 text-ink-soft">
             {habit.location || 'Location not set yet.'}
@@ -240,13 +240,13 @@ export function HabitsScreen() {
   return (
     <div className="mx-auto max-w-garden">
       <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-        systems · structural routines
+        habits
       </p>
       <h1 className="mt-3 font-display text-[72px] leading-none tracking-[-0.02em] text-ink lg:text-[88px]">
-        Design the defaults.
+        Your daily habits.
       </h1>
       <p className="mt-4 max-w-3xl font-display text-[20px] italic leading-8 text-ink-soft">
-        A habit is a small piece of architecture: cue, context, tiny action, repeat.
+        Small repeated actions, done consistently, in the same context.
       </p>
 
       <div className="mt-9">
@@ -256,9 +256,9 @@ export function HabitsScreen() {
       <section className="mt-9 grid gap-5">
         {activeHabits.length === 0 ? (
           <div className="rounded-[20px] border border-dashed border-rule bg-paper p-8">
-            <p className="font-display text-[30px] italic text-ink">No routines drawn yet.</p>
+            <p className="font-display text-[30px] italic text-ink">No habits yet.</p>
             <p className="mt-2 max-w-xl text-[14px] leading-6 text-ink-soft">
-              Start with something so small it feels almost too easy. The structure comes from repetition.
+              Start with something small. Consistency beats intensity every time.
             </p>
           </div>
         ) : null}

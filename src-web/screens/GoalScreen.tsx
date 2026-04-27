@@ -36,13 +36,13 @@ function GoalSetupForm() {
   return (
     <div className="mx-auto max-w-compost">
       <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-        blueprint · empty
+        goal · not set
       </p>
       <h1 className="mt-3 font-display text-[72px] leading-none tracking-[-0.02em] text-ink lg:text-[88px]">
-        Draw the blueprint.
+        Set your goal.
       </h1>
       <p className="mt-4 max-w-2xl font-display text-[20px] italic leading-8 text-ink-soft">
-        Add the structure you are designing toward. You can refine the checkpoints later.
+        What are you working toward? You can update this at any time.
       </p>
 
       <form onSubmit={handleSubmit} className="mt-9 grid gap-4 rounded-[20px] border border-rule bg-paper p-7 shadow-soft">
@@ -50,13 +50,13 @@ function GoalSetupForm() {
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[16px] text-ink outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Blueprint title"
+          placeholder="Goal title"
         />
         <input
           value={target}
           onChange={(event) => setTarget(event.target.value)}
           className="rounded-2xl border border-rule bg-bg px-5 py-4 text-[15px] text-ink outline-none placeholder:text-ink-muted focus:border-sienna"
-          placeholder="Designed outcome"
+          placeholder="What does success look like?"
         />
         <input
           value={harvestBy}
@@ -121,7 +121,7 @@ export function GoalScreen() {
   return (
     <div className="mx-auto max-w-garden">
       <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-ink-muted">
-        blueprint · started {goal.startedAt}
+        goal · started {goal.startedAt}
       </p>
       <h1 className="mt-3 font-display text-[72px] leading-none tracking-[-0.02em] text-ink lg:text-[88px]">
         {goal.title}
@@ -142,7 +142,7 @@ export function GoalScreen() {
               “{goal.whyQuote}”
             </blockquote>
           ) : (
-            <p className="mt-4 text-[15px] leading-7 text-ink-soft">Add the design intent when this starts to blur.</p>
+            <p className="mt-4 text-[15px] leading-7 text-ink-soft">Add a note on why this matters when motivation dips.</p>
           )}
           <div className="my-7 border-t border-dashed border-rule" />
           <div className="grid gap-6 md:grid-cols-2">

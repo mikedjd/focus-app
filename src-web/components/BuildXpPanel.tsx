@@ -21,7 +21,7 @@ export function BuildXpPanel({ goal, compact = false }: BuildXpPanelProps) {
       <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-sienna">
-            XP · structure stage {buildStage}
+            XP · level {buildStage}
           </p>
           <div className="mt-2 flex items-baseline gap-3">
             <span className="font-display text-[54px] leading-none text-sienna">{xpTotal}</span>
@@ -34,14 +34,14 @@ export function BuildXpPanel({ goal, compact = false }: BuildXpPanelProps) {
 
         <div className="min-w-[220px]">
           <div className="mb-2 flex items-center justify-between font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted">
-            <span>Structural integrity</span>
+            <span>Consistency</span>
             <span>{buildHealth}%</span>
           </div>
           <div className="h-3 overflow-hidden rounded-full bg-bg">
             <div className="h-full rounded-full bg-sienna" style={{ width: `${Math.round(progress * 100)}%` }} />
           </div>
           <p className="mt-3 text-[13px] leading-5 text-ink-soft">
-            Complete load-bearing tasks to earn XP. No streak noise; just visible structural progress.
+            Complete tasks to earn XP and track your progress over time.
           </p>
         </div>
       </div>
