@@ -19,7 +19,7 @@ const TIME_SLOTS = [
 
 const EMAIL_PATTERN = /\bemail[s]?\b/i;
 
-function FirstTaskForm() {
+function TaskForm({ variant = 'first' }: { variant?: 'first' | 'inline' }) {
   const phases = useGardenStore((state) => state.phases);
   const activePhase = useGardenStore((state) => state.activePhase);
   const addTask = useGardenStore((state) => state.addTask);
@@ -90,10 +90,10 @@ function FirstTaskForm() {
   return (
     <form onSubmit={handleSubmit} className="rounded-[20px] border border-rule bg-paper p-7 shadow-soft lg:p-8">
       <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-sienna">
-        ✦ Main task
+        {variant === 'first' ? '✦ Main task' : '✦ Add task'}
       </p>
       <h2 className="max-w-3xl font-display text-[42px] leading-none tracking-[-0.02em] text-ink lg:text-[48px]">
-        Add your first task.
+        {variant === 'first' ? 'Add your first task.' : 'Add another task.'}
       </h2>
       <p className="mt-4 max-w-2xl text-[16px] leading-7 text-ink-soft">
         Pick something concrete to work on today. Keep it small enough that starting feels easy.
@@ -218,6 +218,43 @@ function FirstTaskForm() {
   );
 }
 
+function AddTaskPanel() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (isOpen) {
+    return (
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setIsOpen(false)}
+            className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted transition hover:text-sienna"
+          >
+            Close
+          </button>
+        </div>
+        <TaskForm variant="inline" />
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setIsOpen(true)}
+      className="flex w-full items-center justify-between rounded-[20px] border border-dashed border-rule bg-paper/70 px-6 py-5 text-left transition hover:border-sienna hover:bg-paper"
+    >
+      <span>
+        <span className="block font-display text-[26px] leading-none text-ink">Add another task</span>
+        <span className="mt-1 block text-[13px] text-ink-soft">Includes email auto-tag, time slot, and duration XP.</span>
+      </span>
+      <span className="shrink-0 rounded-full bg-sienna px-4 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-paper">
+        Open
+      </span>
+    </button>
+  );
+}
+
 export function TodayScreen() {
   const tasks = useGardenStore((state) => state.tasks);
   const currentTaskId = useGardenStore((state) => state.currentTaskId);
@@ -247,7 +284,14 @@ export function TodayScreen() {
 
         <BuildXpPanel goal={goal} />
 
-        {currentTask ? <OneRowCard task={currentTask} /> : <FirstTaskForm />}
+        {currentTask ? (
+          <>
+            <OneRowCard task={currentTask} />
+            <AddTaskPanel />
+          </>
+        ) : (
+          <TaskForm />
+        )}
       </div>
 
       <div className="mt-14">
