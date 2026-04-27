@@ -1,6 +1,6 @@
 export type GoalStatus = 'active' | 'queued' | 'parked' | 'completed';
 export type GoalPerformanceStatus = 'ahead' | 'on_track' | 'behind' | 'decaying';
-export type WeeklyInspectionResult = 'pass' | 'fail' | 'partial';
+export type WeeklyInspectionResult = 'pass' | 'fail';
 export type TaskStatus = 'pending' | 'done' | 'dropped';
 export type TaskTierLabel = 'T1' | 'T2' | 'T3' | 'T4' | 'T5';
 export type DifficultyPhase = 1 | 2 | 3 | 4;
@@ -277,7 +277,7 @@ export interface DailyXpRow {
 export interface GameStats {
   totalXp: number;
   currentStreak: number;
-  healthScore: number; // 0–100
+  buildHealth: number; // 0–100
   targetXp: number;   // daily_expectation × working_days_to_target_date
   buildStage: 1 | 2 | 3 | 4 | 5;
   dailyExpectation: number; // kept for compatibility; mirrors dailyRequirement.tasksRequired
@@ -428,6 +428,8 @@ export interface WeeklyInspection {
   xpEarned: number;
   tasksCompleted: number;
   hardTasksCompleted: number; // tier >= 3
+  validDays: number;
+  buildHealthChange: number;
   result: WeeklyInspectionResult;
   recoveryTaskCreated: boolean;
   createdAt: number;

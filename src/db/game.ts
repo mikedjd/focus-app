@@ -11,13 +11,42 @@ import type {
   WeeklyInspection,
 } from '../types';
 import { TIER_XP } from '../types';
-import { todayString } from '../utils/dates';
+import { formatDate, getWeekStart, todayString } from '../utils/dates';
 import { generateId } from '../utils/ids';
+import { calculateWeeklyInspection } from '../utils/weeklyInspection';
 import { runDb } from './schema';
 
 const MS_PER_DAY = 86_400_000;
 const WORKING_DAYS_PER_WEEK = 5;
 const MAX_DIFFICULTY_PHASE: DifficultyPhase = 4;
+const RECOVERY_HEALTH_RESTORE = 10;
+
+const RECOVERY_TASKS: Array<{ title: string; tier: TaskTier; nextStep: string; effortLevel: DailyTask['effortLevel'] }> = [
+  {
+    title: 'Do the next concrete step on your goal',
+    tier: 2,
+    nextStep: 'Open the goal, identify the single next action, and do it now.',
+    effortLevel: 'medium',
+  },
+  {
+    title: 'Clear 3 open loops related to your goal',
+    tier: 2,
+    nextStep: 'Identify 3 things that are partially done and close or discard them.',
+    effortLevel: 'medium',
+  },
+  {
+    title: 'Review your goal and why it matters',
+    tier: 1,
+    nextStep: 'Re-read the goal, the why, and write down one thing you can do today.',
+    effortLevel: 'light',
+  },
+  {
+    title: 'Spend 25 minutes on the hardest part',
+    tier: 3,
+    nextStep: 'Set a timer for 25 minutes and work on the thing you have been avoiding.',
+    effortLevel: 'challenging',
+  },
+];
 
 function normalizeDifficultyPhase(value: number | null | undefined): DifficultyPhase {
   if (value === 2 || value === 3 || value === 4) return value;
@@ -91,9 +120,7 @@ export function applyMissedDayPenalty<
   const requirement = getDailyRequirement(goal);
   const currentHealth = goal.buildHealth ?? goal.healthScore ?? 100;
   const nextHealth = Math.max(0, currentHealth - requirement.missPenalty);
-  const shouldDecay =
-    requirement.phase === 4 ||
-    (requirement.phase === 3 && (goal.performanceStatus === 'decaying' || currentHealth <= 90));
+  const shouldDecay = nextHealth < 60;
 
   return {
     ...goal,
@@ -161,7 +188,7 @@ export function calculateGoalStatus(input: {
     ? Math.floor((asOfMs - new Date(input.lastCompletedDate).getTime()) / MS_PER_DAY)
     : null;
 
-  if (input.buildHealth < 40 || (daysSinceCompletion !== null && daysSinceCompletion >= 7)) {
+  if (input.buildHealth < 60 || (daysSinceCompletion !== null && daysSinceCompletion >= 7)) {
     return 'decaying';
   }
 
@@ -176,13 +203,18 @@ export function calculateGoalStatus(input: {
 }
 
 function getStatusCopy(requirement: DailyRequirement, status: GoalPerformanceStatus): string {
-  if (status === 'decaying' && requirement.phase === 4) {
-    return 'Missed target. Recovery task assigned.';
+  if (status === 'decaying') {
+    return 'Build health damaged. Recovery task assigned.';
   }
   if (requirement.phase === 4) {
     return 'Operator Mode unlocked. Expectations increased.';
   }
   return requirement.minimumCopy;
+}
+
+function getRecoveryTaskForDate(date: string): (typeof RECOVERY_TASKS)[number] {
+  const charTotal = date.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return RECOVERY_TASKS[charTotal % RECOVERY_TASKS.length];
 }
 
 function mapXpRow(row: {
@@ -210,12 +242,12 @@ export function dbGetGameStats(goalId: string): GameStats | null {
       target_date: string | null;
       total_xp: number;
       current_streak: number;
-      health_score: number;
+      build_health: number;
       xp_target: number | null;
       difficulty_phase: number | null;
       performance_status: GoalPerformanceStatus | null;
     }>(
-      'SELECT created_at, target_date, total_xp, current_streak, health_score, xp_target, difficulty_phase, performance_status FROM goals WHERE id = ?',
+      'SELECT created_at, target_date, total_xp, current_streak, build_health, xp_target, difficulty_phase, performance_status FROM goals WHERE id = ?',
       [goalId]
     );
     if (!goal) return null;
@@ -241,7 +273,7 @@ export function dbGetGameStats(goalId: string): GameStats | null {
     return {
       totalXp: goal.total_xp,
       currentStreak: goal.current_streak,
-      healthScore: goal.health_score,
+      buildHealth: goal.build_health ?? 100,
       targetXp,
       buildStage,
       dailyExpectation: dailyRequirement.tasksRequired,
@@ -406,22 +438,22 @@ function dbApplyMissedDayPenalty(db: SQLite.SQLiteDatabase, goalId: string, miss
     'UPDATE goals SET build_health = ?, health_score = ?, performance_status = ?, updated_at = ? WHERE id = ?',
     [nextGoal.buildHealth, nextGoal.healthScore, nextGoal.performanceStatus, Date.now(), goalId]
   );
+}
 
-  if (normalizeDifficultyPhase(goal.difficulty_phase) !== 4) return;
-
-  const recoveryDate = missedDate < todayString() ? todayString() : missedDate;
-  const existing = db.getFirstSync<{ id: string }>(
-    "SELECT id FROM daily_tasks WHERE goal_id = ? AND date = ? AND is_recovery_task = 1 AND status != 'dropped' LIMIT 1",
-    [goalId, recoveryDate]
-  );
+function dbAssignRecoveryTaskForWeek(
+  db: SQLite.SQLiteDatabase,
+  goalId: string,
+  weekStart: string,
+  recoveryDate = todayString()
+): boolean {
   const taskCount = db.getFirstSync<{ count: number }>(
     "SELECT COUNT(*) AS count FROM daily_tasks WHERE date = ? AND status != 'dropped'",
     [recoveryDate]
   )?.count ?? 0;
-
-  if (existing || taskCount >= 3) return;
-
+  // Bug 2: respect daily task cap — never push the day above 3 tasks
+  if (taskCount >= 3) return false;
   const now = Date.now();
+  const recoveryTask = getRecoveryTaskForDate(weekStart);
   db.runSync(
     `INSERT INTO daily_tasks (
       id, goal_id, title, next_step, date, status, completed_at, sort_order, created_at,
@@ -431,23 +463,142 @@ function dbApplyMissedDayPenalty(db: SQLite.SQLiteDatabase, goalId: string, miss
     [
       generateId(),
       goalId,
-      'Recovery task: reset the build',
-      'Do one small task to restart momentum.',
+      recoveryTask.title,
+      recoveryTask.nextStep,
       recoveryDate,
       'pending',
       null,
       taskCount,
       now,
       'goal',
-      'light',
+      recoveryTask.effortLevel,
       'phase2',
       25,
       5,
-      1,
+      recoveryTask.tier,
       1,
       now,
     ]
   );
+  return true;
+}
+
+export function dbRecordWeeklyInspectionForActiveGoal(
+  db: SQLite.SQLiteDatabase,
+  weekStart: string
+): WeeklyInspection | null {
+  const goal = db.getFirstSync<{ id: string; difficulty_phase: number | null; build_health: number | null; health_score: number }>(
+    "SELECT id, difficulty_phase, build_health, health_score FROM goals WHERE status = 'active' ORDER BY created_at DESC LIMIT 1"
+  );
+  if (!goal) return null;
+
+  const calculation = calculateWeeklyInspection({
+    weekStart,
+    difficultyPhase: normalizeDifficultyPhase(goal.difficulty_phase),
+    dailyRows: db.getAllSync<{ date: string; xpEarned: number; met: boolean }>(
+      'SELECT date, xp_earned AS xpEarned, CASE WHEN met = 1 THEN 1 ELSE 0 END AS met FROM daily_xp WHERE goal_id = ?',
+      [goal.id]
+    ),
+    tasks: db.getAllSync<{ date: string; status: DailyTask['status']; tier: TaskTier | null }>(
+      'SELECT date, status, tier FROM daily_tasks WHERE goal_id = ?',
+      [goal.id]
+    ),
+  });
+  const existing = db.getFirstSync<{ id: string; recovery_task_created: number; health_change: number | null }>(
+    'SELECT id, recovery_task_created, health_change FROM weekly_inspections WHERE goal_id = ? AND week_start = ?',
+    [goal.id, weekStart]
+  );
+  const priorHealthChange = existing?.health_change ?? 0;
+  const recoveryTaskCreated =
+    calculation.result === 'fail' && existing?.recovery_task_created !== 1
+      ? dbAssignRecoveryTaskForWeek(db, goal.id, weekStart)
+      : false;
+  const currentHealth = goal.build_health ?? goal.health_score ?? 100;
+  const nextHealth = Math.max(0, Math.min(100, currentHealth - priorHealthChange + calculation.buildHealthChange));
+  const nextStatus: GoalPerformanceStatus = nextHealth < 60 ? 'decaying' : 'on_track';
+  db.runSync(
+    'UPDATE goals SET build_health = ?, health_score = ?, performance_status = ?, updated_at = ? WHERE id = ?',
+    [nextHealth, nextHealth, nextStatus, Date.now(), goal.id]
+  );
+
+  const inspection: WeeklyInspection = {
+    id: existing?.id ?? generateId(),
+    goalId: goal.id,
+    weekStart,
+    weekEnd: calculation.weekEnd,
+    xpEarned: calculation.xpEarned,
+    tasksCompleted: calculation.tasksCompleted,
+    hardTasksCompleted: calculation.hardTasksCompleted,
+    validDays: calculation.validDays,
+    buildHealthChange: calculation.buildHealthChange,
+    result: calculation.result,
+    recoveryTaskCreated: recoveryTaskCreated || existing?.recovery_task_created === 1,
+    createdAt: Date.now(),
+  };
+
+  if (existing) {
+    db.runSync(
+      `UPDATE weekly_inspections
+       SET week_end = ?, xp_earned = ?, tasks_completed = ?, hard_tasks_completed = ?,
+           valid_days = ?, health_change = ?, result = ?, recovery_task_created = ?, created_at = ?
+       WHERE id = ?`,
+      [
+        inspection.weekEnd,
+        inspection.xpEarned,
+        inspection.tasksCompleted,
+        inspection.hardTasksCompleted,
+        inspection.validDays,
+        inspection.buildHealthChange,
+        inspection.result,
+        inspection.recoveryTaskCreated ? 1 : 0,
+        inspection.createdAt,
+        existing.id,
+      ]
+    );
+  } else {
+    db.runSync(
+      `INSERT INTO weekly_inspections
+        (id, goal_id, week_start, week_end, xp_earned, tasks_completed, hard_tasks_completed, valid_days, health_change, result, recovery_task_created, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        inspection.id,
+        inspection.goalId,
+        inspection.weekStart,
+        inspection.weekEnd,
+        inspection.xpEarned,
+        inspection.tasksCompleted,
+        inspection.hardTasksCompleted,
+        inspection.validDays,
+        inspection.buildHealthChange,
+        inspection.result,
+        inspection.recoveryTaskCreated ? 1 : 0,
+        inspection.createdAt,
+      ]
+    );
+  }
+
+  // Bug 6: apply difficulty phase upgrade immediately if two consecutive passes
+  const latestInspections = db.getAllSync<{ result: WeeklyInspection['result'] }>(
+    'SELECT result FROM weekly_inspections WHERE goal_id = ? ORDER BY week_start DESC LIMIT 2',
+    [goal.id]
+  );
+  const upgraded = maybeUpgradeDifficultyPhase(
+    { difficultyPhase: normalizeDifficultyPhase(goal.difficulty_phase) },
+    latestInspections
+  );
+  if (upgraded.difficultyPhase !== normalizeDifficultyPhase(goal.difficulty_phase)) {
+    db.runSync('UPDATE goals SET difficulty_phase = ?, updated_at = ? WHERE id = ?', [
+      upgraded.difficultyPhase,
+      Date.now(),
+      goal.id,
+    ]);
+  }
+
+  return inspection;
+}
+
+export function dbRunWeeklyInspection(weekStart = getWeekStart()): WeeklyInspection | null {
+  return runDb('run weekly inspection', null, (db) => dbRecordWeeklyInspectionForActiveGoal(db, weekStart));
 }
 
 export function dbMaybeUpgradeDifficultyPhase(goalId: string): DifficultyPhase {
@@ -478,8 +629,14 @@ export function dbMaybeUpgradeDifficultyPhase(goalId: string): DifficultyPhase {
 
 export function dbRecalcStreakAndHealth(goalId: string): boolean {
   return runDb('recalc streak and health', false, (db) => {
-    const goal = db.getFirstSync<{ difficulty_phase: number | null }>(
-      'SELECT difficulty_phase FROM goals WHERE id = ?',
+    const goal = db.getFirstSync<{
+      difficulty_phase: number | null;
+      total_xp: number;
+      xp_target: number | null;
+      created_at: number;
+      target_date: string | null;
+    }>(
+      'SELECT difficulty_phase, total_xp, xp_target, created_at, target_date FROM goals WHERE id = ?',
       [goalId]
     );
     const requirement = getDailyRequirement({ difficultyPhase: goal?.difficulty_phase });
@@ -495,6 +652,10 @@ export function dbRecalcStreakAndHealth(goalId: string): boolean {
       return true;
     }
 
+    const yesterdayDate = new Date();
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterday = formatDate(yesterdayDate);
+
     let streak = 0;
     let prevDate: string | null = null;
     for (const row of rows) {
@@ -506,6 +667,10 @@ export function dbRecalcStreakAndHealth(goalId: string): boolean {
       streak++;
       prevDate = row.date;
     }
+    // Bug 3: break streak if most recent activity was before yesterday (gap day)
+    if (streak > 0 && rows[0].date < yesterday) {
+      streak = 0;
+    }
 
     let health = 100;
     for (let i = rows.length - 1; i >= 0; i--) {
@@ -513,18 +678,48 @@ export function dbRecalcStreakAndHealth(goalId: string): boolean {
         ? Math.min(100, health + 2)
         : Math.max(0, health - requirement.missPenalty);
     }
+    const recoveryTaskCount = db.getFirstSync<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM daily_tasks WHERE goal_id = ? AND is_recovery_task = 1 AND status = 'done'",
+      [goalId]
+    )?.count ?? 0;
+    const inspectionHealthChange = db.getFirstSync<{ total: number }>(
+      'SELECT COALESCE(SUM(health_change), 0) AS total FROM weekly_inspections WHERE goal_id = ?',
+      [goalId]
+    )?.total ?? 0;
+    health = Math.max(0, Math.min(100, health + recoveryTaskCount * RECOVERY_HEALTH_RESTORE + inspectionHealthChange));
+
+    // Bug 4: apply miss penalty for calendar days with no daily_xp entry
+    if (rows.length > 0 && rows[0].date <= yesterday) {
+      const gapToYesterday = Math.round(
+        (new Date(yesterday).getTime() - new Date(rows[0].date).getTime()) / MS_PER_DAY
+      );
+      if (gapToYesterday > 0) {
+        health = Math.max(0, health - gapToYesterday * requirement.missPenalty);
+      }
+    }
+    for (let i = 0; i < rows.length - 1; i++) {
+      const gap = Math.round(
+        (new Date(rows[i].date).getTime() - new Date(rows[i + 1].date).getTime()) / MS_PER_DAY
+      ) - 1;
+      if (gap > 0) {
+        health = Math.max(0, health - gap * requirement.missPenalty);
+      }
+    }
+    health = Math.max(0, Math.min(100, health));
 
     const streakDate = rows[0]?.date ?? todayString();
-    const repeatedPhase3Miss = requirement.phase === 3 && rows[0]?.met === 0 && rows[1]?.met === 0;
+    // Bug 1: use actual goal XP values (not hardcoded 0/1) for performance status
+    const xpTarget = (goal?.xp_target && goal.xp_target > 0)
+      ? goal.xp_target
+      : computeTargetXp(goal?.created_at ?? Date.now(), goal?.target_date ?? null);
     const performanceStatus: GoalPerformanceStatus =
-      (requirement.phase === 4 && rows[0]?.met === 0) || repeatedPhase3Miss
-        ? 'decaying'
-        : calculateGoalStatus({
-            xpTotal: 0,
-            xpTarget: 1,
-            buildHealth: health,
-            lastCompletedDate: streak > 0 ? streakDate : '',
-          });
+      calculateGoalStatus({
+        xpTotal: goal?.total_xp ?? 0,
+        xpTarget,
+        buildHealth: health,
+        lastCompletedDate: streak > 0 ? streakDate : '',
+        createdAt: goal?.created_at,
+      });
     db.runSync(
       'UPDATE goals SET current_streak = ?, streak_date = ?, health_score = ?, build_health = ?, last_completed_date = ?, performance_status = ?, updated_at = ? WHERE id = ?',
       [streak, streakDate, health, health, streak > 0 ? streakDate : '', performanceStatus, Date.now(), goalId]

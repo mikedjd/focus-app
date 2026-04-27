@@ -1,6 +1,19 @@
 import type { Goal, GoalWriteInput, WeeklyFocus } from '../types';
-import { generateAnchorLines } from '../utils/goalAnchors';
 import { getWeekStart } from '../utils/dates';
+
+function generateAnchorLines(input: { practicalReason: string; emotionalReason: string; costOfDrift: string }): {
+  anchorWhy: string;
+  anchorDrift: string;
+} {
+  return {
+    anchorWhy: input.practicalReason || input.emotionalReason || '',
+    anchorDrift: input.costOfDrift || '',
+  };
+}
+
+function createDefaultGoalInput(): GoalWriteInput {
+  return { title: 'My first goal', why: 'To build momentum and prove the system works.' };
+}
 import { generateId } from '../utils/ids';
 import { runDb } from './schema';
 
@@ -160,26 +173,14 @@ function normalizeGoalInput(input: GoalWriteInput): NormalizedGoalInput {
 }
 
 export function dbCreateDefaultGoal(): Goal | null {
-  const today = new Date().toISOString().slice(0, 10);
-  return dbCreateGoal({
-    title: 'Build momentum',
-    targetOutcome: 'Create a steady weekly goal rhythm',
-    targetDate: null,
-    metric: 'XP earned',
-    why: 'A simple default goal keeps tasks anchored until a specific goal is chosen.',
-    practicalReason: 'Keep daily tasks grouped.',
-    emotionalReason: 'Make progress visible.',
-    costOfDrift: 'Tasks drift without an anchor.',
-    description: 'Default goal project',
-    startDate: today,
-    whyItMatters: 'A small visible build is easier to return to.',
-  });
+  return dbCreateGoal(createDefaultGoalInput());
 }
 
 export function dbCreateGoal(input: GoalWriteInput): Goal | null {
   return runDb('create goal', null, (db) => {
     const normalized = normalizeGoalInput(input);
     const now = Date.now();
+    db.runSync("UPDATE goals SET status = 'completed', updated_at = ? WHERE status = 'active'", [now]);
     const goal: Goal = {
       id: generateId(),
       name: normalized.title,

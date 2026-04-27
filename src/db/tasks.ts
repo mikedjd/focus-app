@@ -367,10 +367,18 @@ export function dbCompleteTask(id: string): boolean {
 
 export function dbUncompleteTask(id: string): boolean {
   return runDb('uncomplete task', false, (db) => {
+    const task = db.getFirstSync<{ goal_id: string; date: string }>(
+      'SELECT goal_id, date FROM daily_tasks WHERE id = ?',
+      [id]
+    );
     db.runSync("UPDATE daily_tasks SET status = 'pending', completed_at = NULL, updated_at = ? WHERE id = ?", [
       Date.now(),
       id,
     ]);
+    if (task) {
+      dbUpsertDailyXp(task.goal_id, task.date);
+      dbRecalcStreakAndHealth(task.goal_id);
+    }
     dbRefreshResumeContext();
     return true;
   });
@@ -378,10 +386,18 @@ export function dbUncompleteTask(id: string): boolean {
 
 export function dbDropTask(id: string): boolean {
   return runDb('drop task', false, (db) => {
+    const task = db.getFirstSync<{ goal_id: string; date: string }>(
+      'SELECT goal_id, date FROM daily_tasks WHERE id = ?',
+      [id]
+    );
     db.runSync("UPDATE daily_tasks SET status = 'dropped', updated_at = ? WHERE id = ?", [
       Date.now(),
       id,
     ]);
+    if (task) {
+      dbUpsertDailyXp(task.goal_id, task.date);
+      dbRecalcStreakAndHealth(task.goal_id);
+    }
     dbRefreshResumeContext();
     return true;
   });

@@ -36,6 +36,7 @@ import {
   dbCalculateDifficultyPhase as nativeCalculateDifficultyPhase,
   dbCalculateGoalStatus as nativeCalculateGoalStatus,
   dbMaybeUpgradeDifficultyPhase as nativeMaybeUpgradeDifficultyPhase,
+  dbRunWeeklyInspection as nativeRunWeeklyInspection,
 } from './game';
 
 import {
@@ -150,6 +151,7 @@ export const dbCalculateBuildPhase      = isWeb ? webDb.dbCalculateBuildPhase   
 export const dbCalculateDifficultyPhase = isWeb ? webDb.dbCalculateDifficultyPhase : nativeCalculateDifficultyPhase;
 export const dbCalculateGoalStatus      = isWeb ? webDb.dbCalculateGoalStatus      : nativeCalculateGoalStatus;
 export const dbMaybeUpgradeDifficultyPhase = isWeb ? webDb.dbMaybeUpgradeDifficultyPhase : nativeMaybeUpgradeDifficultyPhase;
+export const dbRunWeeklyInspection = isWeb ? webDb.dbRunWeeklyInspection : nativeRunWeeklyInspection;
 
 // Reviews
 export const dbGetReviewForWeek = isWeb ? webDb.dbGetReviewForWeek : nativeGetReviewForWeek;

@@ -223,6 +223,8 @@ function bootstrapDatabase() {
       xp_earned INTEGER NOT NULL DEFAULT 0,
       tasks_completed INTEGER NOT NULL DEFAULT 0,
       hard_tasks_completed INTEGER NOT NULL DEFAULT 0,
+      valid_days INTEGER NOT NULL DEFAULT 0,
+      health_change INTEGER NOT NULL DEFAULT 0,
       result TEXT NOT NULL DEFAULT 'partial',
       recovery_task_created INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
@@ -238,6 +240,8 @@ function bootstrapDatabase() {
     UPDATE goals SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = 0;
     UPDATE daily_tasks SET updated_at = COALESCE(completed_at, created_at) WHERE updated_at IS NULL OR updated_at = 0;
   `);
+  ensureColumn('weekly_inspections', 'valid_days', 'ALTER TABLE weekly_inspections ADD COLUMN valid_days INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('weekly_inspections', 'health_change', 'ALTER TABLE weekly_inspections ADD COLUMN health_change INTEGER NOT NULL DEFAULT 0');
 }
 
 function hasColumn(tableName, columnName) {
@@ -309,6 +313,9 @@ const commands = {
   },
   saveReview({ weekOf, wins, whatDrifted, driftReasons, nextWeekAdjustment }) {
     return saveReview(weekOf, wins, whatDrifted, driftReasons, nextWeekAdjustment);
+  },
+  runWeeklyInspection({ weekStart }) {
+    return runWeeklyInspection(weekStart);
   },
   isReviewDue() {
     return isReviewDue();
@@ -393,6 +400,13 @@ const commands = {
 
 const TIER_XP = { 1: 5, 2: 15, 3: 40, 4: 100, 5: 300 };
 const MS_PER_DAY = 86_400_000;
+const RECOVERY_HEALTH_RESTORE = 10;
+const RECOVERY_TASKS = [
+  ['Add 3 sites to pipeline', 2, 'Add three concrete site leads, even if they need checking later.', 'medium'],
+  ['Contact 2 agents or landowners', 2, 'Send two direct messages or emails and log the follow-up.', 'medium'],
+  ['Review 1 live site properly', 3, 'Check one live site against the actual deal criteria.', 'challenging'],
+  ['Do 20-minute pipeline cleanup', 1, 'Spend 20 minutes removing stale leads and clarifying next actions.', 'light'],
+];
 
 function normalizeDifficultyPhase(value) {
   return value === 2 || value === 3 || value === 4 ? value : 1;
@@ -459,9 +473,7 @@ function applyMissedDayPenalty(goal) {
   const currentHealth = goal.buildHealth ?? goal.build_health ?? goal.healthScore ?? goal.health_score ?? 100;
   const nextHealth = Math.max(0, currentHealth - requirement.missPenalty);
   const currentStatus = goal.performanceStatus ?? goal.performance_status ?? 'on_track';
-  const shouldDecay =
-    requirement.phase === 4 ||
-    (requirement.phase === 3 && (currentStatus === 'decaying' || currentHealth <= 90));
+  const shouldDecay = nextHealth < 60;
   return {
     ...goal,
     buildHealth: nextHealth,
@@ -511,7 +523,7 @@ function computeGoalStatus({ xpTotal, xpTarget, buildHealth, lastCompletedDate, 
   const daysSinceCompletion = lastCompletedDate
     ? Math.floor((asOfMs - new Date(lastCompletedDate).getTime()) / MS_PER_DAY)
     : null;
-  if (buildHealth < 40 || (daysSinceCompletion !== null && daysSinceCompletion >= 7)) return 'decaying';
+  if (buildHealth < 60 || (daysSinceCompletion !== null && daysSinceCompletion >= 7)) return 'decaying';
   const ratio = xpTarget > 0 ? xpTotal / xpTarget : 1;
   const daysSinceCreated = createdAt ? Math.floor((asOfMs - createdAt) / MS_PER_DAY) : 0;
   if (ratio >= 1.1) return 'ahead';
@@ -587,13 +599,19 @@ function getGameStats(goalId) {
 }
 
 function getStatusCopy(requirement, status) {
-  if (status === 'decaying' && requirement.phase === 4) {
-    return 'Missed target. Recovery task assigned.';
+  if (status === 'decaying') {
+    return 'Build health damaged. Recovery task assigned.';
   }
   if (requirement.phase === 4) {
     return 'Operator Mode unlocked. Expectations increased.';
   }
   return requirement.minimumCopy;
+}
+
+function getRecoveryTaskForDate(date) {
+  const charTotal = date.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const [title, tier, nextStep, effortLevel] = RECOVERY_TASKS[charTotal % RECOVERY_TASKS.length];
+  return { title, tier, nextStep, effortLevel };
 }
 
 function upsertDailyXp(goalId, date) {
@@ -645,20 +663,15 @@ function applyMissedDayPenaltyForGoal(goalId, missedDate) {
   db.prepare(
     'UPDATE goals SET build_health = ?, health_score = ?, performance_status = ?, updated_at = ? WHERE id = ?'
   ).run(nextGoal.buildHealth, nextGoal.healthScore, nextGoal.performanceStatus, Date.now(), goalId);
+}
 
-  if (normalizeDifficultyPhase(goal.difficulty_phase) !== 4) return;
-
-  const recoveryDate = missedDate < todayString() ? todayString() : missedDate;
-  const existing = db.prepare(
-    "SELECT id FROM daily_tasks WHERE goal_id = ? AND date = ? AND is_recovery_task = 1 AND status != 'dropped' LIMIT 1"
-  ).get(goalId, recoveryDate);
+function assignRecoveryTaskForWeek(goalId, weekStart, recoveryDate = todayString()) {
   const taskCount = db.prepare(
     "SELECT COUNT(*) AS count FROM daily_tasks WHERE date = ? AND status != 'dropped'"
   ).get(recoveryDate)?.count ?? 0;
 
-  if (existing || taskCount >= DAILY_TASK_CAP) return;
-
   const now = Date.now();
+  const recoveryTask = getRecoveryTaskForDate(weekStart);
   db.prepare(
     `INSERT INTO daily_tasks (
       id, goal_id, title, next_step, date, status, completed_at, sort_order, created_at,
@@ -668,22 +681,23 @@ function applyMissedDayPenaltyForGoal(goalId, missedDate) {
   ).run(
     generateId(),
     goalId,
-    'Recovery task: reset the build',
-    'Do one small task to restart momentum.',
+    recoveryTask.title,
+    recoveryTask.nextStep,
     recoveryDate,
     'pending',
     null,
     taskCount,
     now,
     'goal',
-    'light',
+    recoveryTask.effortLevel,
     'phase2',
     25,
     5,
-    1,
+    recoveryTask.tier,
     1,
     now
   );
+  return true;
 }
 
 function maybeUpgradeDifficultyPhaseForGoal(goalId) {
@@ -704,6 +718,105 @@ function maybeUpgradeDifficultyPhaseForGoal(goalId) {
     );
   }
   return nextGoal.difficultyPhase;
+}
+
+function recordWeeklyInspectionForActiveGoal(weekStart) {
+  const goal = db.prepare("SELECT id, difficulty_phase, build_health, health_score FROM goals WHERE status = 'active' ORDER BY created_at DESC LIMIT 1").get();
+  if (!goal) return null;
+  const startDate = new Date(weekStart);
+  const weekEnd = formatDate(new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6));
+  const rows = db.prepare(
+    'SELECT date, xp_earned, met FROM daily_xp WHERE goal_id = ? AND date >= ? AND date <= ?'
+  ).all(goal.id, weekStart, weekEnd);
+  const tasks = db.prepare(
+    "SELECT date, status, tier FROM daily_tasks WHERE goal_id = ? AND date >= ? AND date <= ?"
+  ).all(goal.id, weekStart, weekEnd);
+  const validDays = rows.filter((row) => row.met === 1).length;
+  const completedTasks = tasks.filter((task) => task.status === 'done');
+  const hardTasksCompleted = completedTasks.filter((task) => (task.tier ?? 1) >= 3).length;
+  const tier2PlusCompleted = completedTasks.filter((task) => (task.tier ?? 1) >= 2).length;
+  const phase = normalizeDifficultyPhase(goal.difficulty_phase);
+  const result =
+    validDays >= 5
+      ? phase === 4
+        ? hardTasksCompleted >= 1 ? 'pass' : 'partial'
+        : phase === 3
+          ? tier2PlusCompleted >= 1 ? 'pass' : 'partial'
+          : 'pass'
+      : validDays >= 3
+        ? 'partial'
+        : 'fail';
+  const healthChange = result === 'pass' ? 5 : result === 'fail' ? -10 : 0;
+  const existing = db.prepare(
+    'SELECT id, recovery_task_created, health_change FROM weekly_inspections WHERE goal_id = ? AND week_start = ?'
+  ).get(goal.id, weekStart);
+  const recoveryTaskCreated =
+    result === 'fail' && existing?.recovery_task_created !== 1
+      ? assignRecoveryTaskForWeek(goal.id, weekStart)
+      : false;
+  const priorHealthChange = existing?.health_change ?? 0;
+  const currentHealth = goal.build_health ?? goal.health_score ?? 100;
+  const nextHealth = Math.max(0, Math.min(100, currentHealth - priorHealthChange + healthChange));
+  db.prepare(
+    'UPDATE goals SET build_health = ?, health_score = ?, performance_status = ?, updated_at = ? WHERE id = ?'
+  ).run(nextHealth, nextHealth, nextHealth < 60 ? 'decaying' : 'on_track', Date.now(), goal.id);
+  const inspection = {
+    id: existing?.id ?? generateId(),
+    goalId: goal.id,
+    weekStart,
+    weekEnd,
+    xpEarned: rows.reduce((sum, row) => sum + row.xp_earned, 0),
+    tasksCompleted: completedTasks.length,
+    hardTasksCompleted,
+    validDays,
+    buildHealthChange: healthChange,
+    result,
+    recoveryTaskCreated: recoveryTaskCreated || existing?.recovery_task_created === 1,
+    createdAt: Date.now(),
+  };
+  if (existing) {
+    db.prepare(
+      `UPDATE weekly_inspections
+       SET week_end = ?, xp_earned = ?, tasks_completed = ?, hard_tasks_completed = ?,
+           valid_days = ?, health_change = ?, result = ?, recovery_task_created = ?, created_at = ?
+       WHERE id = ?`
+    ).run(
+      inspection.weekEnd,
+      inspection.xpEarned,
+      inspection.tasksCompleted,
+      inspection.hardTasksCompleted,
+      inspection.validDays,
+      inspection.buildHealthChange,
+      inspection.result,
+      inspection.recoveryTaskCreated ? 1 : 0,
+      inspection.createdAt,
+      existing.id
+    );
+  } else {
+    db.prepare(
+      `INSERT INTO weekly_inspections
+        (id, goal_id, week_start, week_end, xp_earned, tasks_completed, hard_tasks_completed, valid_days, health_change, result, recovery_task_created, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      inspection.id,
+      inspection.goalId,
+      inspection.weekStart,
+      inspection.weekEnd,
+      inspection.xpEarned,
+      inspection.tasksCompleted,
+      inspection.hardTasksCompleted,
+      inspection.validDays,
+      inspection.buildHealthChange,
+      inspection.result,
+      inspection.recoveryTaskCreated ? 1 : 0,
+      inspection.createdAt
+    );
+  }
+  return inspection;
+}
+
+function runWeeklyInspection(weekStart = getWeekStart()) {
+  return recordWeeklyInspectionForActiveGoal(weekStart);
 }
 
 function recalcStreakAndHealth(goalId) {
@@ -736,17 +849,21 @@ function recalcStreakAndHealth(goalId) {
   for (let i = rows.length - 1; i >= 0; i--) {
     health = rows[i].met === 1 ? Math.min(100, health + 2) : Math.max(0, health - requirement.missPenalty);
   }
+  const recoveryTaskCount = db.prepare(
+    "SELECT COUNT(*) AS count FROM daily_tasks WHERE goal_id = ? AND is_recovery_task = 1 AND status = 'done'"
+  ).get(goalId)?.count ?? 0;
+  const inspectionHealthChange = db.prepare(
+    'SELECT COALESCE(SUM(health_change), 0) AS total FROM weekly_inspections WHERE goal_id = ?'
+  ).get(goalId)?.total ?? 0;
+  health = Math.max(0, Math.min(100, health + recoveryTaskCount * RECOVERY_HEALTH_RESTORE + inspectionHealthChange));
 
-  const repeatedPhase3Miss = requirement.phase === 3 && rows[0]?.met === 0 && rows[1]?.met === 0;
   const performanceStatus =
-    (requirement.phase === 4 && rows[0]?.met === 0) || repeatedPhase3Miss
-      ? 'decaying'
-      : computeGoalStatus({
-          xpTotal: 0,
-          xpTarget: 1,
-          buildHealth: health,
-          lastCompletedDate: streak > 0 ? rows[0].date : '',
-        });
+    computeGoalStatus({
+      xpTotal: 0,
+      xpTarget: 1,
+      buildHealth: health,
+      lastCompletedDate: streak > 0 ? rows[0].date : '',
+    });
 
   db.prepare('UPDATE goals SET current_streak = ?, streak_date = ?, health_score = ?, build_health = ?, last_completed_date = ?, performance_status = ?, updated_at = ? WHERE id = ?').run(
     streak, rows[0].date, health, health, streak > 0 ? rows[0].date : '', performanceStatus, Date.now(), goalId
@@ -811,6 +928,34 @@ function getPrevWeekStart(date = new Date()) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() - 7);
   return getWeekStart(copy);
+}
+
+function addMonthsToDate(dateStr, months) {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setMonth(date.getMonth() + months);
+  return formatDate(date);
+}
+
+function createDefaultGoalInput(startDate = todayString()) {
+  const title = 'Build repeatable UK land sourcing business';
+  const whyItMatters = 'Build a repeatable deal engine that creates freedom, purpose, and long-term wealth.';
+  return {
+    title,
+    targetOutcome: title,
+    targetDate: addMonthsToDate(startDate, 12),
+    metric: 'XP earned',
+    why: whyItMatters,
+    practicalReason: whyItMatters,
+    emotionalReason: '',
+    costOfDrift: '',
+    anchorWhy: whyItMatters,
+    anchorDrift: '',
+    description: title,
+    startDate,
+    whyItMatters,
+    xpTarget: 10000,
+  };
 }
 
 function offsetDateString(offsetDays) {
@@ -972,8 +1117,8 @@ function getActiveGoal() {
 
 function createGoal(input) {
   const normalized = normalizeGoalInput(input);
-  db.prepare("UPDATE goals SET status = 'archived' WHERE status = 'active'").run();
   const now = Date.now();
+  db.prepare("UPDATE goals SET status = 'completed', updated_at = ? WHERE status = 'active'").run(now);
   const goal = {
     id: generateId(),
     ...normalized,
@@ -1019,18 +1164,7 @@ function createGoal(input) {
 }
 
 function createDefaultGoal() {
-  return createGoal({
-    title: 'Build momentum',
-    targetOutcome: 'Create a steady weekly goal rhythm',
-    metric: 'XP earned',
-    why: 'A simple default goal keeps tasks anchored until a specific goal is chosen.',
-    practicalReason: 'Keep daily tasks grouped.',
-    emotionalReason: 'Make progress visible.',
-    costOfDrift: 'Tasks drift without an anchor.',
-    description: 'Default goal project',
-    startDate: todayString(),
-    whyItMatters: 'A small visible build is easier to return to.',
-  });
+  return createGoal(createDefaultGoalInput());
 }
 
 function updateGoal(id, input) {
@@ -1323,13 +1457,23 @@ function completeTask(id) {
 }
 
 function uncompleteTask(id) {
+  const task = db.prepare('SELECT goal_id, date FROM daily_tasks WHERE id = ?').get(id);
   db.prepare("UPDATE daily_tasks SET status = 'pending', completed_at = NULL, updated_at = ? WHERE id = ?").run(Date.now(), id);
+  if (task) {
+    upsertDailyXp(task.goal_id, task.date);
+    recalcStreakAndHealth(task.goal_id);
+  }
   refreshResumeContext();
   return true;
 }
 
 function dropTask(id) {
+  const task = db.prepare('SELECT goal_id, date FROM daily_tasks WHERE id = ?').get(id);
   db.prepare("UPDATE daily_tasks SET status = 'dropped', updated_at = ? WHERE id = ?").run(Date.now(), id);
+  if (task) {
+    upsertDailyXp(task.goal_id, task.date);
+    recalcStreakAndHealth(task.goal_id);
+  }
   refreshResumeContext();
   return true;
 }
@@ -1475,6 +1619,7 @@ function saveReview(weekOf, wins, whatDrifted, driftReasons, nextWeekAdjustment)
        SET wins = ?, what_drifted = ?, drift_reasons = ?, next_week_adjustment = ?, completed_at = ?
        WHERE id = ?`
     ).run(wins, whatDrifted, driftReasonsStr, nextWeekAdjustment, now, existing.id);
+    recordWeeklyInspectionForActiveGoal(weekOf);
     return mapReview({
       ...existing,
       wins,
@@ -1506,6 +1651,7 @@ function saveReview(weekOf, wins, whatDrifted, driftReasons, nextWeekAdjustment)
     review.drift_reasons,
     review.next_week_adjustment
   );
+  recordWeeklyInspectionForActiveGoal(weekOf);
   return mapReview(review);
 }
 

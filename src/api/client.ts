@@ -17,6 +17,7 @@ import type {
   ResumeContext,
   TaskWriteResult,
   WeeklyFocus,
+  WeeklyInspection,
   WeeklyReview,
 } from '../types';
 import * as webDb from '../db/web';
@@ -162,6 +163,17 @@ export async function getCurrentWeeklyFocus(goalId: string): Promise<WeeklyFocus
 export async function upsertWeeklyFocus(goalId: string, focus: string): Promise<WeeklyFocus | null> {
   if (IS_WEB) { const r = webDb.dbUpsertWeeklyFocus(goalId, focus); notifyDataChanged(); return r; }
   const result = await rpc<WeeklyFocus | null>('upsertWeeklyFocus', { goalId, focus });
+  notifyDataChanged();
+  return result;
+}
+
+export async function runWeeklyInspection(weekStart?: string): Promise<WeeklyInspection | null> {
+  if (IS_WEB) {
+    const r = webDb.dbRunWeeklyInspection(weekStart);
+    notifyDataChanged();
+    return r;
+  }
+  const result = await rpc<WeeklyInspection | null>('runWeeklyInspection', { weekStart });
   notifyDataChanged();
   return result;
 }

@@ -51,8 +51,21 @@ import {
   normalizeWakeTime,
 } from '../utils/dailyPhases';
 import { formatDate, getPrevWeekStart, getWeekStart, todayString } from '../utils/dates';
-import { generateAnchorLines } from '../utils/goalAnchors';
+function generateAnchorLines(input: { practicalReason: string; emotionalReason: string; costOfDrift: string }): {
+  anchorWhy: string;
+  anchorDrift: string;
+} {
+  return {
+    anchorWhy: input.practicalReason || input.emotionalReason || '',
+    anchorDrift: input.costOfDrift || '',
+  };
+}
+
+function createDefaultGoalInput(): GoalWriteInput {
+  return { title: 'My first goal', why: 'To build momentum and prove the system works.' };
+}
 import { generateId } from '../utils/ids';
+import { calculateWeeklyInspection } from '../utils/weeklyInspection';
 import { findWindowForEffort } from './webControlCenter';
 
 // ─── Storage keys ────────────────────────────────────────────────────────────
@@ -79,6 +92,34 @@ const DISMISSED_RESUME_TASK_ID_KEY = 'dismissed_resume_task_id';
 const FOCUS_RESUME_WINDOW_MS = 36 * 60 * 60 * 1000;
 const GOAL_STATUS_ORDER: GoalStatus[] = ['active', 'queued', 'parked', 'completed'];
 const MS_PER_DAY = 86_400_000;
+const RECOVERY_HEALTH_RESTORE = 10;
+
+const RECOVERY_TASKS: Array<{ title: string; tier: TaskTier; nextStep: string; effortLevel: DailyTask['effortLevel'] }> = [
+  {
+    title: 'Do the next concrete step on your goal',
+    tier: 2,
+    nextStep: 'Open the goal, identify the single next action, and do it now.',
+    effortLevel: 'medium',
+  },
+  {
+    title: 'Clear 3 open loops related to your goal',
+    tier: 2,
+    nextStep: 'Identify 3 things that are partially done and close or discard them.',
+    effortLevel: 'medium',
+  },
+  {
+    title: 'Review your goal and why it matters',
+    tier: 1,
+    nextStep: 'Re-read the goal, the why, and write down one thing you can do today.',
+    effortLevel: 'light',
+  },
+  {
+    title: 'Spend 25 minutes on the hardest part',
+    tier: 3,
+    nextStep: 'Set a timer for 25 minutes and work on the thing you have been avoiding.',
+    effortLevel: 'challenging',
+  },
+];
 
 // ─── Raw localStorage helpers ────────────────────────────────────────────────
 
@@ -348,18 +389,7 @@ export function dbGetGoals(): Goal[] {
 }
 
 export function dbCreateDefaultGoal(): Goal | null {
-  return dbCreateGoal({
-    title: 'Build momentum',
-    targetOutcome: 'Create a steady weekly goal rhythm',
-    metric: 'XP earned',
-    why: 'A simple default goal keeps tasks anchored until a specific goal is chosen.',
-    practicalReason: 'Keep daily tasks grouped.',
-    emotionalReason: 'Make progress visible.',
-    costOfDrift: 'Tasks drift without an anchor.',
-    description: 'Default goal project',
-    startDate: todayString(),
-    whyItMatters: 'A small visible build is easier to return to.',
-  });
+  return dbCreateGoal(createDefaultGoalInput(), { status: 'active' });
 }
 
 export function dbCreateGoal(
@@ -414,7 +444,9 @@ export function dbCreateGoal(
   const updatedGoals =
     nextStatus === 'active'
       ? goals.map((existingGoal) =>
-          existingGoal.status === 'active' ? { ...existingGoal, status: 'queued' as const } : existingGoal
+          existingGoal.status === 'active' || existingGoal.status === 'queued' || existingGoal.status === 'parked'
+            ? { ...existingGoal, status: 'completed' as const }
+            : existingGoal
         )
       : goals;
   save(KEY_GOALS, [...updatedGoals, goal]);
@@ -699,14 +731,24 @@ export function dbCompleteTask(id: string): boolean {
 
 export function dbUncompleteTask(id: string): boolean {
   const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
+  const task = tasks.find((candidate) => candidate.id === id);
   save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'pending' as const, completedAt: null, updatedAt: Date.now() } : t)));
+  if (task) {
+    dbUpsertDailyXp(task.goalId, task.date);
+    dbRecalcStreakAndHealth(task.goalId);
+  }
   webRefreshResumeContext();
   return true;
 }
 
 export function dbDropTask(id: string): boolean {
   const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
+  const task = tasks.find((candidate) => candidate.id === id);
   save(KEY_TASKS, tasks.map((t) => (t.id === id ? { ...t, status: 'dropped' as const, updatedAt: Date.now() } : t)));
+  if (task) {
+    dbUpsertDailyXp(task.goalId, task.date);
+    dbRecalcStreakAndHealth(task.goalId);
+  }
   webRefreshResumeContext();
   return true;
 }
@@ -787,9 +829,7 @@ export function applyMissedDayPenalty<
   const requirement = getDailyRequirement(goal);
   const currentHealth = goal.buildHealth ?? goal.healthScore ?? 100;
   const nextHealth = Math.max(0, currentHealth - requirement.missPenalty);
-  const shouldDecay =
-    requirement.phase === 4 ||
-    (requirement.phase === 3 && (goal.performanceStatus === 'decaying' || currentHealth <= 90));
+  const shouldDecay = nextHealth < 60;
 
   return {
     ...goal,
@@ -821,27 +861,25 @@ function computeTargetXp(goal: Goal): number {
   return Math.max(1, workingDays * TIER_XP[2]);
 }
 
-function assignRecoveryTask(goalId: string, missedDate: string): void {
-  const recoveryDate = missedDate < todayString() ? todayString() : missedDate;
-  const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
-  const exists = tasks.some(
-    (task) =>
-      task.goalId === goalId &&
-      task.date === recoveryDate &&
-      task.isRecoveryTask &&
-      task.status !== 'dropped'
-  );
-  if (exists || getActiveTasks(tasks, recoveryDate).length >= DAILY_TASK_CAP) return;
+function getRecoveryTaskForDate(date: string): (typeof RECOVERY_TASKS)[number] {
+  const charTotal = date.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return RECOVERY_TASKS[charTotal % RECOVERY_TASKS.length];
+}
 
+function assignRecoveryTask(goalId: string, seedDate: string, recoveryDate = todayString()): boolean {
+  const tasks = load<DailyTask>(KEY_TASKS).map(normalizeTask);
+  // Bug 2: respect daily task cap — never push the day above 3 tasks
+  if (getActiveTasks(tasks, recoveryDate).length >= DAILY_TASK_CAP) return false;
   const now = Date.now();
+  const recoveryTask = getRecoveryTaskForDate(seedDate);
   const task: DailyTask = {
     id: generateId(),
     goalId,
     projectId: null,
     weeklyFocusId: null,
     sourceTaskId: null,
-    title: 'Recovery task: reset the build',
-    nextStep: 'Do one small task to restart momentum.',
+    title: recoveryTask.title,
+    nextStep: recoveryTask.nextStep,
     date: recoveryDate,
     status: 'pending',
     completedAt: null,
@@ -849,17 +887,18 @@ function assignRecoveryTask(goalId: string, missedDate: string): void {
     createdAt: now,
     updatedAt: now,
     taskType: 'goal',
-    effortLevel: 'light',
+    effortLevel: recoveryTask.effortLevel,
     milestoneId: null,
     scheduledWindowStart: '',
     phaseId: 'phase2',
     focusDurationMinutes: 25,
     breakDurationMinutes: 5,
-    tier: 1,
+    tier: recoveryTask.tier,
     linkedSite: null,
     isRecoveryTask: true,
   };
   save(KEY_TASKS, [...tasks, task]);
+  return true;
 }
 
 export function calculateBuildPhase(totalXp: number, targetXp: number): 1 | 2 | 3 | 4 | 5 {
@@ -892,7 +931,7 @@ export function calculateGoalStatus(input: {
   const daysSinceCompletion = input.lastCompletedDate
     ? Math.floor((asOfMs - new Date(input.lastCompletedDate).getTime()) / MS_PER_DAY)
     : null;
-  if (input.buildHealth < 40 || (daysSinceCompletion !== null && daysSinceCompletion >= 7)) {
+  if (input.buildHealth < 60 || (daysSinceCompletion !== null && daysSinceCompletion >= 7)) {
     return 'decaying';
   }
 
@@ -904,8 +943,8 @@ export function calculateGoalStatus(input: {
 }
 
 function getStatusCopy(requirement: DailyRequirement, status: GoalPerformanceStatus): string {
-  if (status === 'decaying' && requirement.phase === 4) {
-    return 'Missed target. Recovery task assigned.';
+  if (status === 'decaying') {
+    return 'Build health damaged. Recovery task assigned.';
   }
   if (requirement.phase === 4) {
     return 'Operator Mode unlocked. Expectations increased.';
@@ -926,7 +965,7 @@ export function dbGetGameStats(goalId: string): GameStats | null {
   return {
     totalXp: goal.totalXp,
     currentStreak: goal.currentStreak,
-    healthScore: goal.healthScore,
+    buildHealth: goal.buildHealth ?? goal.healthScore ?? 100,
     targetXp,
     buildStage: calculateBuildPhase(goal.totalXp, targetXp),
     dailyExpectation: dailyRequirement.tasksRequired,
@@ -975,9 +1014,6 @@ export function dbUpsertDailyXp(goalId: string, date: string): DailyXpRow | null
     updatedAt: Date.now(),
   };
   const finalGoal = met ? updatedGoal : applyMissedDayPenalty(updatedGoal);
-  if (!met && getDailyRequirement(goal).phase === 4) {
-    assignRecoveryTask(goalId, date);
-  }
   save(KEY_GOALS, goals.map((candidate) => (candidate.id === goalId ? finalGoal : candidate)));
   return row;
 }
@@ -1032,6 +1068,11 @@ export function dbRecalcStreakAndHealth(goalId: string): boolean {
   const rows = load<DailyXpRow>(KEY_DAILY_XP)
     .filter((row) => row.goalId === goalId)
     .sort((a, b) => b.date.localeCompare(a.date));
+
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterday = formatDate(yesterdayDate);
+
   let streak = 0;
   let prevDate: string | null = null;
   for (const row of rows) {
@@ -1043,25 +1084,59 @@ export function dbRecalcStreakAndHealth(goalId: string): boolean {
     streak++;
     prevDate = row.date;
   }
+  // Bug 3: break streak if most recent activity was before yesterday (gap day)
+  if (streak > 0 && rows.length > 0 && rows[0].date < yesterday) {
+    streak = 0;
+  }
+
   let health = 100;
   const requirement = getDailyRequirement(goal);
   for (let i = rows.length - 1; i >= 0; i--) {
     health = rows[i].met ? Math.min(100, health + 2) : Math.max(0, health - requirement.missPenalty);
   }
+  const recoveryTaskCount = load<DailyTask>(KEY_TASKS)
+    .map(normalizeTask)
+    .filter((task) => task.goalId === goalId && task.isRecoveryTask && task.status === 'done').length;
+  const inspectionHealthChange = load<WeeklyInspection>(KEY_WEEKLY_INSPECTIONS)
+    .filter((inspection) => inspection.goalId === goalId)
+    .reduce((sum, inspection) => sum + (inspection.buildHealthChange ?? 0), 0);
+  health = Math.max(0, Math.min(100, health + recoveryTaskCount * RECOVERY_HEALTH_RESTORE + inspectionHealthChange));
+
+  // Bug 4: apply miss penalty for calendar days with no daily_xp entry
+  if (rows.length > 0 && rows[0].date <= yesterday) {
+    const gapToYesterday = Math.round(
+      (new Date(yesterday).getTime() - new Date(rows[0].date).getTime()) / MS_PER_DAY
+    );
+    if (gapToYesterday > 0) {
+      health = Math.max(0, health - gapToYesterday * requirement.missPenalty);
+    }
+  }
+  for (let i = 0; i < rows.length - 1; i++) {
+    const gap = Math.round(
+      (new Date(rows[i].date).getTime() - new Date(rows[i + 1].date).getTime()) / MS_PER_DAY
+    ) - 1;
+    if (gap > 0) {
+      health = Math.max(0, health - gap * requirement.missPenalty);
+    }
+  }
+  health = Math.max(0, Math.min(100, health));
+
   const lastCompletedDate = streak > 0 ? rows[0]?.date ?? '' : '';
   const targetXp = computeTargetXp(goal);
-  const upgradedGoal = maybeUpgradeDifficultyPhase(goal);
-  const repeatedPhase3Miss = requirement.phase === 3 && rows[0]?.met === false && rows[1]?.met === false;
+  // Bug 5: pass inspections so two-pass phase upgrade fires correctly
+  const inspectionsForUpgrade = load<WeeklyInspection>(KEY_WEEKLY_INSPECTIONS)
+    .filter((row) => row.goalId === goalId)
+    .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+    .slice(0, 2);
+  const upgradedGoal = maybeUpgradeDifficultyPhase(goal, inspectionsForUpgrade);
   const performanceStatus =
-    (requirement.phase === 4 && rows[0]?.met === false) || repeatedPhase3Miss
-      ? 'decaying'
-      : calculateGoalStatus({
-          xpTotal: goal.totalXp,
-          xpTarget: targetXp,
-          buildHealth: health,
-          lastCompletedDate,
-          createdAt: goal.createdAt,
-        });
+    calculateGoalStatus({
+      xpTotal: goal.totalXp,
+      xpTarget: targetXp,
+      buildHealth: health,
+      lastCompletedDate,
+      createdAt: goal.createdAt,
+    });
   save(
     KEY_GOALS,
     goals.map((candidate) =>
@@ -1082,6 +1157,68 @@ export function dbRecalcStreakAndHealth(goalId: string): boolean {
     )
   );
   return true;
+}
+
+function recordWeeklyInspectionForActiveGoal(weekStart: string): WeeklyInspection | null {
+  const goal = getGoalsStore().find((candidate) => candidate.status === 'active');
+  if (!goal) return null;
+  const rows = load<DailyXpRow>(KEY_DAILY_XP).filter((row) => row.goalId === goal.id);
+  const tasks = load<DailyTask>(KEY_TASKS)
+    .map(normalizeTask)
+    .filter((task) => task.goalId === goal.id);
+  const calculation = calculateWeeklyInspection({
+    weekStart,
+    difficultyPhase: normalizeDifficultyPhase(goal.difficultyPhase),
+    dailyRows: rows,
+    tasks,
+  });
+  const inspections = load<WeeklyInspection>(KEY_WEEKLY_INSPECTIONS);
+  const existing = inspections.find((row) => row.goalId === goal.id && row.weekStart === weekStart);
+  const recoveryTaskCreated =
+    calculation.result === 'fail' && !existing?.recoveryTaskCreated ? assignRecoveryTask(goal.id, weekStart) : false;
+  const priorHealthChange = existing?.buildHealthChange ?? 0;
+  const nextHealth = Math.max(0, Math.min(100, goal.buildHealth - priorHealthChange + calculation.buildHealthChange));
+  save(
+    KEY_GOALS,
+    getGoalsStore().map((candidate) =>
+      candidate.id === goal.id
+        ? {
+            ...candidate,
+            buildHealth: nextHealth,
+            healthScore: nextHealth,
+            performanceStatus: nextHealth < 60 ? 'decaying' : 'on_track',
+            updatedAt: Date.now(),
+          }
+        : candidate
+    )
+  );
+  const inspection: WeeklyInspection = {
+    id: existing?.id ?? generateId(),
+    goalId: goal.id,
+    weekStart,
+    weekEnd: calculation.weekEnd,
+    xpEarned: calculation.xpEarned,
+    tasksCompleted: calculation.tasksCompleted,
+    hardTasksCompleted: calculation.hardTasksCompleted,
+    validDays: calculation.validDays,
+    buildHealthChange: calculation.buildHealthChange,
+    result: calculation.result,
+    recoveryTaskCreated: recoveryTaskCreated || !!existing?.recoveryTaskCreated,
+    createdAt: Date.now(),
+  };
+  save(
+    KEY_WEEKLY_INSPECTIONS,
+    existing
+      ? inspections.map((row) => (row.id === existing.id ? inspection : row))
+      : [...inspections, inspection]
+  );
+  // Bug 6: apply difficulty phase upgrade immediately if two consecutive passes
+  dbMaybeUpgradeDifficultyPhase(goal.id);
+  return inspection;
+}
+
+export function dbRunWeeklyInspection(weekStart = getWeekStart()): WeeklyInspection | null {
+  return recordWeeklyInspectionForActiveGoal(weekStart);
 }
 
 // ─── Focus session functions ─────────────────────────────────────────────────
@@ -1262,6 +1399,7 @@ export function dbSaveReview(
     result = { id: generateId(), weekOf, completedAt: now, wins, whatDrifted, driftReasons, nextWeekAdjustment };
     save(KEY_REVIEWS, [...reviews, result]);
   }
+  recordWeeklyInspectionForActiveGoal(weekOf);
   return result;
 }
 
