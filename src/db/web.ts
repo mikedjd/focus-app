@@ -30,8 +30,6 @@ import type {
   ResumeContext,
   TaskTier,
   TaskWriteResult,
-  Vision,
-  VisionWriteInput,
   WeeklyFocus,
   WeeklyInspection,
   WeeklyReview,
@@ -76,7 +74,6 @@ const KEY_FOCUSES = 'adhd_focuses';
 const KEY_REVIEWS = 'adhd_reviews';
 const KEY_DAILY_REVIEWS = 'adhd_daily_reviews';
 const KEY_PROJECTS = 'adhd_projects';
-const KEY_VISIONS = 'adhd_visions';
 const KEY_HABITS = 'adhd_habits';
 const KEY_HABIT_COMPLETIONS = 'adhd_habit_completions';
 const KEY_MILESTONES = 'adhd_milestones';
@@ -212,7 +209,6 @@ function normalizeGoalInput(input: GoalWriteInput) {
     urgency: clampGoalRating(input.urgency, 1),
     payoff: clampGoalRating(input.payoff, 2),
     whyNow: cleanText(input.whyNow),
-    visionId: input.visionId ?? null,
     description: cleanText(input.description),
     startDate: cleanText(input.startDate) || null,
     whyItMatters: cleanText(input.whyItMatters) || anchorWhy,
@@ -259,7 +255,6 @@ function normalizeStoredGoal(goal: Goal | (Partial<Goal> & { id: string; title: 
     currentFrictionMinutes: (goal as Goal).currentFrictionMinutes ?? 2,
     weeklySeatedSeconds: (goal as Goal).weeklySeatedSeconds ?? 0,
     weeklySeatedWeekOf: (goal as Goal).weeklySeatedWeekOf ?? '',
-    visionId: (goal as Goal).visionId ?? null,
     totalXp,
     currentStreak,
     streakDate: (goal as Goal).streakDate ?? '',
@@ -357,7 +352,6 @@ function ensureStandaloneTaskGoal(goals: Goal[]): Goal[] {
       currentFrictionMinutes: 2,
       weeklySeatedSeconds: 0,
       weeklySeatedWeekOf: '',
-      visionId: null,
       totalXp: 0,
       currentStreak: 0,
       streakDate: '',
@@ -423,7 +417,6 @@ export function dbCreateGoal(
     currentFrictionMinutes: 2,
     weeklySeatedSeconds: 0,
     weeklySeatedWeekOf: '',
-    visionId: n.visionId ?? null,
     totalXp: 0,
     currentStreak: 0,
     streakDate: '',
@@ -474,7 +467,6 @@ export function dbUpdateGoal(id: string, input: GoalWriteInput): boolean {
           urgency: n.urgency,
           payoff: n.payoff,
           whyNow: n.whyNow,
-          visionId: n.visionId ?? g.visionId ?? null,
           name: n.title,
           description: n.description,
           startDate: n.startDate,
@@ -1725,64 +1717,6 @@ function webRefreshResumeContext(): ResumeContext | null {
   return null;
 }
 
-// ─── Visions ──────────────────────────────────────────────────────────────────
-
-export function dbGetVisions(): Vision[] {
-  return load<Vision>(KEY_VISIONS)
-    .filter((v) => v.status !== 'archived')
-    .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
-}
-
-export function dbGetVisionById(id: string): Vision | null {
-  return load<Vision>(KEY_VISIONS).find((v) => v.id === id) ?? null;
-}
-
-export function dbCreateVision(input: VisionWriteInput): Vision {
-  const visions = load<Vision>(KEY_VISIONS);
-  const vision: Vision = {
-    id: generateId(),
-    title: cleanText(input.title),
-    description: cleanText(input.description),
-    identityStatement: cleanText(input.identityStatement),
-    color: input.color || '#3B5BDB',
-    sortOrder: visions.length,
-    status: 'active',
-    createdAt: Date.now(),
-  };
-  save(KEY_VISIONS, [...visions, vision]);
-  return vision;
-}
-
-export function dbUpdateVision(id: string, input: VisionWriteInput): boolean {
-  const visions = load<Vision>(KEY_VISIONS);
-  save(
-    KEY_VISIONS,
-    visions.map((v) =>
-      v.id === id
-        ? {
-            ...v,
-            title: cleanText(input.title) || v.title,
-            description: cleanText(input.description),
-            identityStatement: cleanText(input.identityStatement),
-            color: input.color || v.color,
-          }
-        : v
-    )
-  );
-  return true;
-}
-
-export function dbArchiveVision(id: string): boolean {
-  const visions = load<Vision>(KEY_VISIONS);
-  save(KEY_VISIONS, visions.map((v) => (v.id === id ? { ...v, status: 'archived' as const } : v)));
-  // Unlink goals/habits
-  const goals = getGoalsStore();
-  save(KEY_GOALS, goals.map((g) => (g.visionId === id ? { ...g, visionId: null } : g)));
-  const habits = load<Habit>(KEY_HABITS);
-  save(KEY_HABITS, habits.map((h) => (h.visionId === id ? { ...h, visionId: null } : h)));
-  return true;
-}
-
 // ─── Habits ───────────────────────────────────────────────────────────────────
 
 function normalizeHabit(h: Habit | (Partial<Habit> & { id: string; title: string; startedAt: number })): Habit {
@@ -1797,7 +1731,6 @@ function normalizeHabit(h: Habit | (Partial<Habit> & { id: string; title: string
     cadenceTarget: (h as Habit).cadenceTarget ?? 7,
     cadenceDays: Array.isArray((h as Habit).cadenceDays) ? (h as Habit).cadenceDays! : [],
     goalId: (h as Habit).goalId ?? null,
-    visionId: (h as Habit).visionId ?? null,
     status: ((h as Habit).status as Habit['status']) || 'learning',
     startedAt: h.startedAt ?? Date.now(),
     graduatedAt: (h as Habit).graduatedAt ?? null,
@@ -1832,7 +1765,6 @@ export function dbCreateHabit(input: HabitWriteInput): Habit {
     cadenceTarget: input.cadenceTarget ?? 7,
     cadenceDays: input.cadenceDays ?? [],
     goalId: input.goalId ?? null,
-    visionId: input.visionId ?? null,
     status: 'learning',
     startedAt: Date.now(),
     graduatedAt: null,
@@ -1859,7 +1791,6 @@ export function dbUpdateHabit(id: string, input: HabitWriteInput): boolean {
             cadenceTarget: input.cadenceTarget ?? h.cadenceTarget,
             cadenceDays: input.cadenceDays ?? h.cadenceDays,
             goalId: input.goalId === undefined ? h.goalId : input.goalId,
-            visionId: input.visionId === undefined ? h.visionId : input.visionId,
           })
         : h
     )

@@ -18,7 +18,6 @@ export type InboxClassification =
   | 'unknown';
 export type ParkingStatus = 'parked' | 'promoted' | 'dismissed';
 export type FocusSessionStatus = 'active' | 'completed' | 'abandoned';
-export type VisionStatus = 'active' | 'archived';
 export type HabitStatus = 'learning' | 'maintaining' | 'graduated' | 'paused';
 export type HabitCueType = 'time' | 'stack' | 'location' | 'free';
 export type HabitCadenceType = 'daily' | 'weekdays' | 'n_per_week' | 'custom_days';
@@ -47,7 +46,6 @@ export interface GoalWriteInput {
   urgency?: number;
   payoff?: number;
   whyNow?: string;
-  visionId?: string | null;
   description?: string;
   startDate?: string | null;
   whyItMatters?: string;
@@ -77,7 +75,6 @@ export interface Goal {
   currentFrictionMinutes: number;
   weeklySeatedSeconds: number;
   weeklySeatedWeekOf: string;
-  visionId: string | null;
   totalXp: number;
   currentStreak: number;
   streakDate: string;
@@ -180,24 +177,6 @@ export interface Project {
   createdAt: number;
 }
 
-export interface Vision {
-  id: string;
-  title: string;
-  description: string;
-  identityStatement: string;
-  color: string;
-  sortOrder: number;
-  status: VisionStatus;
-  createdAt: number;
-}
-
-export interface VisionWriteInput {
-  title: string;
-  description?: string;
-  identityStatement?: string;
-  color?: string;
-}
-
 export interface Habit {
   id: string;
   title: string;
@@ -209,7 +188,6 @@ export interface Habit {
   cadenceTarget: number;
   cadenceDays: number[]; // 0=Sun..6=Sat, only when cadenceType='custom_days'
   goalId: string | null;
-  visionId: string | null;
   status: HabitStatus;
   startedAt: number;
   graduatedAt: number | null;
@@ -226,7 +204,6 @@ export interface HabitWriteInput {
   cadenceTarget?: number;
   cadenceDays?: number[];
   goalId?: string | null;
-  visionId?: string | null;
 }
 
 export interface HabitCompletion {

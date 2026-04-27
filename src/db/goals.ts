@@ -34,7 +34,6 @@ type GoalRow = {
   current_friction_minutes?: number | null;
   weekly_seated_seconds?: number | null;
   weekly_seated_week_of?: string | null;
-  vision_id?: string | null;
   total_xp?: number | null;
   current_streak?: number | null;
   streak_date?: string | null;
@@ -103,7 +102,6 @@ function mapGoal(row: GoalRow): Goal {
     currentFrictionMinutes: row.current_friction_minutes ?? 2,
     weeklySeatedSeconds: row.weekly_seated_seconds ?? 0,
     weeklySeatedWeekOf: row.weekly_seated_week_of ?? '',
-    visionId: row.vision_id ?? null,
     totalXp,
     currentStreak,
     streakDate: row.streak_date ?? '',
@@ -204,7 +202,6 @@ export function dbCreateGoal(input: GoalWriteInput): Goal | null {
       currentFrictionMinutes: 2,
       weeklySeatedSeconds: 0,
       weeklySeatedWeekOf: '',
-      visionId: null,
       totalXp: 0,
       currentStreak: 0,
       streakDate: '',

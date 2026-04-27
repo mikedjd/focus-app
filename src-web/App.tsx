@@ -30,8 +30,6 @@ import type {
   Project,
   ResumeContext,
   TaskTier,
-  Vision,
-  VisionWriteInput,
   WeeklyInspection,
 } from '../src/types';
 import { TIER_XP } from '../src/types';
@@ -905,7 +903,6 @@ function HabitModal({
   open,
   initial,
   goals,
-  visions,
   onClose,
   onSubmit,
   onDelete,
@@ -913,7 +910,6 @@ function HabitModal({
   open: boolean;
   initial: Habit | null;
   goals: Goal[];
-  visions: Vision[];
   onClose: () => void;
   onSubmit: (input: HabitWriteInput) => void;
   onDelete?: () => void;
@@ -926,7 +922,6 @@ function HabitModal({
   const [cadenceTarget, setCadenceTarget] = useState(3);
   const [cadenceDays, setCadenceDays] = useState<number[]>([]);
   const [goalId, setGoalId] = useState<string | null>(null);
-  const [visionId, setVisionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -938,7 +933,6 @@ function HabitModal({
     setCadenceTarget(initial?.cadenceTarget ?? 3);
     setCadenceDays(initial?.cadenceDays ?? []);
     setGoalId(initial?.goalId ?? null);
-    setVisionId(initial?.visionId ?? null);
   }, [open, initial]);
 
   function submit(event: FormEvent) {
@@ -953,7 +947,6 @@ function HabitModal({
       cadenceTarget,
       cadenceDays,
       goalId,
-      visionId,
     });
     onClose();
   }
@@ -1050,18 +1043,6 @@ function HabitModal({
           ) : null}
         </div>
 
-        {visions.length > 0 ? (
-          <label className="field">
-            <span>Ladder to vision (optional)</span>
-            <select value={visionId ?? ''} onChange={(e) => setVisionId(e.target.value || null)}>
-              <option value="">Standalone</option>
-              {visions.map((v) => (
-                <option key={v.id} value={v.id}>{v.title}</option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-
         {goals.length > 0 ? (
           <label className="field">
             <span>Link to goal (optional)</span>
@@ -1102,11 +1083,9 @@ function HabitModal({
 function HabitsSection({
   habitsToday,
   goals,
-  visions,
 }: {
   habitsToday: HabitTodayView[];
   goals: Goal[];
-  visions: Vision[];
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Habit | null>(null);
@@ -1173,7 +1152,6 @@ function HabitsSection({
         open={modalOpen}
         initial={editing}
         goals={goals}
-        visions={visions}
         onClose={() => setModalOpen(false)}
         onSubmit={(input) => {
           if (editing) {
@@ -1226,206 +1204,6 @@ function HabitRow({
         </div>
       </button>
     </div>
-  );
-}
-
-// ─── Visions UI ───────────────────────────────────────────────────────────────
-
-function VisionModal({
-  open,
-  initial,
-  onClose,
-  onSubmit,
-  onArchive,
-}: {
-  open: boolean;
-  initial: Vision | null;
-  onClose: () => void;
-  onSubmit: (input: VisionWriteInput) => void;
-  onArchive?: () => void;
-}) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [identity, setIdentity] = useState('');
-
-  useEffect(() => {
-    if (!open) return;
-    setTitle(initial?.title ?? '');
-    setDescription(initial?.description ?? '');
-    setIdentity(initial?.identityStatement ?? '');
-  }, [open, initial]);
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!title.trim()) return;
-    onSubmit({ title: title.trim(), description: description.trim(), identityStatement: identity.trim() });
-    onClose();
-  }
-
-  return (
-    <Modal open={open} title={initial ? 'Edit vision' : 'New vision'} onClose={onClose}>
-      <form onSubmit={submit} className="stack">
-        <label className="field">
-          <span>Vision (1–5 years out)</span>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Financial independence"
-            autoFocus
-          />
-        </label>
-        <label className="field">
-          <span>Why it matters</span>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="The life this unlocks..."
-            rows={3}
-          />
-        </label>
-        <label className="field">
-          <span>I am someone who... (identity)</span>
-          <input
-            value={identity}
-            onChange={(e) => setIdentity(e.target.value)}
-            placeholder="...builds wealth patiently"
-          />
-        </label>
-        <div className="modal-actions">
-          {initial && onArchive ? (
-            <button
-              type="button"
-              className="ghost-button danger-text"
-              onClick={() => {
-                if (window.confirm(`Archive vision "${initial.title}"? Linked goals and habits will be unlinked.`)) {
-                  onArchive();
-                  onClose();
-                }
-              }}
-            >
-              Archive
-            </button>
-          ) : null}
-          <button type="button" className="ghost-button" onClick={onClose}>Cancel</button>
-          <button type="submit" className="primary-button" disabled={!title.trim()}>
-            {initial ? 'Save' : 'Create vision'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function VisionsSection({
-  visions,
-  activeGoal,
-}: {
-  visions: Vision[];
-  activeGoal: Goal | null;
-}) {
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<Vision | null>(null);
-
-  const activeVision = activeGoal?.visionId ? visions.find((v) => v.id === activeGoal.visionId) ?? null : null;
-
-  return (
-    <section className="card vision-card">
-      <div className="section-header">
-        <div>
-          <p className="eyebrow">Vision</p>
-          <h3>{visions.length === 0 ? 'Give your goal somewhere to ladder to' : 'Long-term direction'}</h3>
-        </div>
-        <button
-          className="secondary-button"
-          type="button"
-          onClick={() => {
-            setEditing(null);
-            setModalOpen(true);
-          }}
-        >
-          Add vision
-        </button>
-      </div>
-
-      {visions.length === 0 ? (
-        <p className="muted-copy">
-          A vision is the 1–5 year direction your active goal serves. Without one, goals feel arbitrary.
-        </p>
-      ) : (
-        <div className="stack">
-          {visions.map((v) => {
-            const isActive = activeVision?.id === v.id;
-            return (
-              <div key={v.id} className={`vision-row ${isActive ? 'is-active' : ''}`}>
-                <div className="vision-row-body">
-                  <div className="vision-title-row">
-                    <span className="vision-title">{v.title}</span>
-                    {isActive ? <span className="metric-chip">Current ladder</span> : null}
-                  </div>
-                  {v.identityStatement ? <p className="vision-identity">I am someone who {v.identityStatement}</p> : null}
-                  {v.description ? <p className="muted-copy">{v.description}</p> : null}
-                </div>
-                <div className="inline-actions">
-                  {activeGoal && !isActive ? (
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() =>
-                        mutate(() =>
-                          db.dbUpdateGoal(activeGoal.id, {
-                            title: activeGoal.title,
-                            targetOutcome: activeGoal.targetOutcome,
-                            targetDate: activeGoal.targetDate,
-                            metric: activeGoal.metric,
-                            why: activeGoal.why,
-                            practicalReason: activeGoal.practicalReason,
-                            emotionalReason: activeGoal.emotionalReason,
-                            costOfDrift: activeGoal.costOfDrift,
-                            anchorWhy: activeGoal.anchorWhy,
-                            anchorDrift: activeGoal.anchorDrift,
-                            importance: activeGoal.importance,
-                            urgency: activeGoal.urgency,
-                            payoff: activeGoal.payoff,
-                            whyNow: activeGoal.whyNow,
-                            visionId: v.id,
-                          })
-                        )
-                      }
-                    >
-                      Ladder goal here
-                    </button>
-                  ) : null}
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={() => {
-                      setEditing(v);
-                      setModalOpen(true);
-                    }}
-                  >
-                    Edit
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <VisionModal
-        open={modalOpen}
-        initial={editing}
-        onClose={() => setModalOpen(false)}
-        onSubmit={(input) => {
-          if (editing) {
-            mutate(() => db.dbUpdateVision(editing.id, input));
-          } else {
-            mutate(() => db.dbCreateVision(input));
-          }
-        }}
-        onArchive={editing ? () => mutate(() => db.dbArchiveVision(editing.id)) : undefined}
-      />
-    </section>
   );
 }
 
@@ -1485,7 +1263,6 @@ function LegacyTodayPage() {
     brainDumpItems,
     resumeContext,
     habitsToday,
-    visions,
     goals,
   } = useDataSnapshot(() => {
     const activeGoal = db.dbGetActiveGoal();
@@ -1496,7 +1273,6 @@ function LegacyTodayPage() {
       brainDumpItems: db.dbGetBrainDumpItems(),
       resumeContext: db.dbGetResumeContext(),
       habitsToday: db.dbGetTodayHabits(),
-      visions: db.dbGetVisions(),
       goals: db.dbGetGoals(),
     };
   });
@@ -1754,7 +1530,7 @@ function LegacyTodayPage() {
         )}
       </section>
 
-      <HabitsSection habitsToday={habitsToday} goals={goals} visions={visions} />
+      <HabitsSection habitsToday={habitsToday} goals={goals} />
 
       <section className="card">
         <div className="section-header">
@@ -2535,7 +2311,7 @@ function GoalTree({
 }
 
 function GoalsPage() {
-  const { goals, activeGoal, visions, treeNodes } = useDataSnapshot(() => {
+  const { goals, activeGoal, treeNodes } = useDataSnapshot(() => {
     const goals = db.dbGetGoals();
     const activeGoal = goals.find((goal) => goal.status === 'active') ?? null;
     const tasks = db.dbGetAllTasks();
@@ -2567,7 +2343,6 @@ function GoalsPage() {
     return {
       goals,
       activeGoal,
-      visions: db.dbGetVisions(),
       treeNodes,
     };
   });
@@ -2607,8 +2382,6 @@ function GoalsPage() {
           </button>
         </div>
       </section>
-
-      <VisionsSection visions={visions} activeGoal={activeGoal} />
 
       {goals.length === 0 ? (
         <section className="card empty-card">

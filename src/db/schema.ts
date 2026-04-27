@@ -545,20 +545,6 @@ function ensurePlannerShape(db: SQLite.SQLiteDatabase): void {
 
 function ensureLifeArchitectureShape(db: SQLite.SQLiteDatabase): void {
   db.execSync(`
-    CREATE TABLE IF NOT EXISTS visions (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      identity_statement TEXT NOT NULL DEFAULT '',
-      color TEXT NOT NULL DEFAULT '#3B5BDB',
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'active',
-      created_at INTEGER NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_visions_status_sort
-      ON visions(status, sort_order);
-
     CREATE TABLE IF NOT EXISTS habits (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -570,13 +556,11 @@ function ensureLifeArchitectureShape(db: SQLite.SQLiteDatabase): void {
       cadence_target INTEGER NOT NULL DEFAULT 7,
       cadence_days TEXT NOT NULL DEFAULT '',
       goal_id TEXT,
-      vision_id TEXT,
       status TEXT NOT NULL DEFAULT 'learning',
       started_at INTEGER NOT NULL,
       graduated_at INTEGER,
       sort_order INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (goal_id) REFERENCES goals(id),
-      FOREIGN KEY (vision_id) REFERENCES visions(id),
       FOREIGN KEY (stack_anchor_habit_id) REFERENCES habits(id)
     );
 
@@ -598,13 +582,6 @@ function ensureLifeArchitectureShape(db: SQLite.SQLiteDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_habit_completions_date
       ON habit_completions(date);
   `);
-
-  ensureColumn(
-    db,
-    'goals',
-    'vision_id',
-    'ALTER TABLE goals ADD COLUMN vision_id TEXT REFERENCES visions(id)'
-  );
 
   // Make projects.goal_id nullable by recreating the table.
   // SQLite lacks a direct "drop NOT NULL" — standard recreate-copy-rename pattern.
