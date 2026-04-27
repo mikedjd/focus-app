@@ -44,6 +44,7 @@ interface GardenState {
   setUserName: (name: string) => void;
   updateGoal: (input: GoalInput) => void;
   addTask: (input: TaskInput) => void;
+  moveTask: (taskId: string, targetPhaseId: PhaseId) => void;
   addHabit: (input: HabitInput) => void;
   completeHabit: (habitId: string) => void;
   pauseHabit: (habitId: string) => void;
@@ -81,6 +82,7 @@ export interface TaskInput {
   totalCycles: number;
   estimateMinutes: number;
   xpValue: number;
+  scheduledTime?: string;
 }
 
 export interface HabitInput {
@@ -165,14 +167,20 @@ export const useGardenStore = create<GardenState>()(
       cyclesDone: 0,
       totalCycles: input.totalCycles,
       estimateMinutes: input.estimateMinutes,
-      xpValue: input.xpValue || DEFAULT_TASK_XP,
+      xpValue: input.xpValue,
       status: 'idle',
+      scheduledTime: input.scheduledTime,
     };
 
     set((state) => ({
       tasks: [...state.tasks, task],
       currentTaskId: state.currentTaskId ?? task.id,
       activePhase: state.currentTaskId ? state.activePhase : task.phaseId,
+    }));
+  },
+  moveTask: (taskId, targetPhaseId) => {
+    set((state) => ({
+      tasks: state.tasks.map((t) => t.id === taskId ? { ...t, phaseId: targetPhaseId } : t),
     }));
   },
   addHabit: (input) => {

@@ -1,4 +1,4 @@
-export type PhaseId = 'deep' | 'admin' | 'creative';
+export type PhaseId = 'deep' | 'admin' | 'creative' | 'review';
 
 export type SessionState = 'idle' | 'running' | 'paused' | 'complete';
 
@@ -30,6 +30,7 @@ export interface Task {
   xpValue: number;
   status: TaskStatus;
   lastNote?: string;
+  scheduledTime?: string;
 }
 
 export interface Milestone {
