@@ -109,14 +109,16 @@ function createGoalProgress(sourceGoal: Goal): GoalProgress {
 }
 
 const initialGoalProgress = createGoalProgress(goal);
+const starterCurrentTaskId = seedTasks[0]?.id ?? null;
+const starterActivePhase = seedTasks[0]?.phaseId ?? 'deep';
 
 export const useGardenStore = create<GardenState>()(
   persist((set, get) => ({
   phases,
   goal,
   tasks: seedTasks,
-  currentTaskId: seedTasks[0]?.id ?? null,
-  activePhase: 'deep',
+  currentTaskId: starterCurrentTaskId,
+  activePhase: starterActivePhase,
   sessionState: 'idle',
   activeSession: null,
   frictionHistory: seedFrictionHistory,
@@ -383,14 +385,14 @@ export const useGardenStore = create<GardenState>()(
   resetAppData: () =>
     set({
       goal,
-      tasks: [],
-      currentTaskId: null,
-      activePhase: 'deep',
+      tasks: seedTasks,
+      currentTaskId: starterCurrentTaskId,
+      activePhase: starterActivePhase,
       sessionState: 'idle',
       activeSession: null,
       frictionHistory: [],
       brainDumpItems: [],
-      habits: [],
+      habits: seedHabits,
       goalProgress: initialGoalProgress,
       resumeState: null,
     }),
@@ -408,5 +410,24 @@ export const useGardenStore = create<GardenState>()(
     resumeState: state.resumeState,
     userName: state.userName,
   }),
-  version: 1,
+  version: 2,
+  migrate: (persistedState, version) => {
+    const state = persistedState as Partial<GardenState>;
+    const hasNoStarterContent =
+      (state.tasks?.length ?? 0) === 0 &&
+      (state.habits?.length ?? 0) === 0;
+
+    if (version < 2 && hasNoStarterContent) {
+      return {
+        ...state,
+        tasks: seedTasks,
+        currentTaskId: starterCurrentTaskId,
+        activePhase: starterActivePhase,
+        habits: seedHabits,
+        goalProgress: initialGoalProgress,
+      };
+    }
+
+    return state;
+  },
 }));
