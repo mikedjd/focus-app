@@ -4,17 +4,21 @@ import {
   brainDumpItems as seedBrainDumpItems,
   frictionHistory as seedFrictionHistory,
   goal,
+  habits as seedHabits,
   phases,
   resumeState as seedResumeState,
   tasks as seedTasks,
 } from '../lib/mockData';
 import { deterministicTilt, nowCaughtLabel } from '../lib/format';
+import { todayKey } from '../lib/habits';
 import { DEFAULT_TASK_XP, DEFAULT_XP_TARGET, calculateBuildStage } from '../lib/xp';
 import type {
   BrainDumpItem,
   FrictionHistory,
   Goal,
   GoalProgress,
+  Habit,
+  HabitCadence,
   Phase,
   PhaseId,
   ResumeState,
@@ -35,8 +39,13 @@ interface GardenState {
   brainDumpItems: BrainDumpItem[];
   goalProgress: GoalProgress;
   resumeState: ResumeState | null;
+  habits: Habit[];
   updateGoal: (input: GoalInput) => void;
   addTask: (input: TaskInput) => void;
+  addHabit: (input: HabitInput) => void;
+  completeHabit: (habitId: string) => void;
+  pauseHabit: (habitId: string) => void;
+  archiveHabit: (habitId: string) => void;
   setActivePhase: (phaseId: PhaseId) => void;
   setCurrentTask: (taskId: string) => void;
   startSession: (taskId?: string) => void;
@@ -72,6 +81,18 @@ export interface TaskInput {
   xpValue: number;
 }
 
+export interface HabitInput {
+  title: string;
+  identity: string;
+  tinyAction: string;
+  anchor: string;
+  location: string;
+  frictionCut: string;
+  celebration: string;
+  cadence: HabitCadence;
+  targetPerWeek: number;
+}
+
 function createGoalProgress(sourceGoal: Goal): GoalProgress {
   const upNextMilestone = sourceGoal.milestones.find((milestone) => milestone.state === 'up-next');
 
@@ -97,6 +118,7 @@ export const useGardenStore = create<GardenState>()(
   brainDumpItems: seedBrainDumpItems,
   goalProgress: initialGoalProgress,
   resumeState: seedResumeState,
+  habits: seedHabits,
   updateGoal: (input) => {
     const today = new Date();
     const startedAt = today.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -149,6 +171,57 @@ export const useGardenStore = create<GardenState>()(
       activePhase: state.currentTaskId ? state.activePhase : task.phaseId,
     }));
   },
+  addHabit: (input) => {
+    const habit: Habit = {
+      id: `habit-${Date.now()}`,
+      title: input.title.trim(),
+      identity: input.identity.trim(),
+      tinyAction: input.tinyAction.trim(),
+      anchor: input.anchor.trim(),
+      location: input.location.trim(),
+      frictionCut: input.frictionCut.trim(),
+      celebration: input.celebration.trim(),
+      cadence: input.cadence,
+      targetPerWeek: input.targetPerWeek,
+      status: 'active',
+      createdAt: todayKey(),
+      completions: [],
+      skips: [],
+    };
+
+    set((state) => ({ habits: [habit, ...state.habits] }));
+  },
+  completeHabit: (habitId) => {
+    const today = todayKey();
+
+    set((state) => ({
+      habits: state.habits.map((habit) =>
+        habit.id === habitId
+          ? {
+              ...habit,
+              completions: habit.completions.includes(today)
+                ? habit.completions
+                : [...habit.completions, today],
+              skips: habit.skips.filter((day) => day !== today),
+            }
+          : habit,
+      ),
+    }));
+  },
+  pauseHabit: (habitId) =>
+    set((state) => ({
+      habits: state.habits.map((habit) =>
+        habit.id === habitId
+          ? { ...habit, status: habit.status === 'paused' ? 'active' : 'paused' }
+          : habit,
+      ),
+    })),
+  archiveHabit: (habitId) =>
+    set((state) => ({
+      habits: state.habits.map((habit) =>
+        habit.id === habitId ? { ...habit, status: 'archived' } : habit,
+      ),
+    })),
   setActivePhase: (phaseId) => set({ activePhase: phaseId }),
   setCurrentTask: (taskId) => {
     const task = get().tasks.find((candidate) => candidate.id === taskId);
@@ -302,6 +375,7 @@ export const useGardenStore = create<GardenState>()(
       activeSession: null,
       frictionHistory: [],
       brainDumpItems: [],
+      habits: [],
       goalProgress: initialGoalProgress,
       resumeState: null,
     }),
@@ -314,6 +388,7 @@ export const useGardenStore = create<GardenState>()(
     activePhase: state.activePhase,
     frictionHistory: state.frictionHistory,
     brainDumpItems: state.brainDumpItems,
+    habits: state.habits,
     goalProgress: state.goalProgress,
     resumeState: state.resumeState,
   }),

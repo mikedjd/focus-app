@@ -5,6 +5,7 @@ export function Sidebar() {
   const goal = useGardenStore((state) => state.goal);
   const tasks = useGardenStore((state) => state.tasks);
   const brainDumpItems = useGardenStore((state) => state.brainDumpItems);
+  const habits = useGardenStore((state) => state.habits);
   const resetAppData = useGardenStore((state) => state.resetAppData);
   const visibleBrainDumpCount = brainDumpItems.filter((item) => item.status === 'pile').length;
 
@@ -12,7 +13,7 @@ export function Sidebar() {
     { to: '/', label: 'Board', note: String(tasks.filter((task) => task.status !== 'done').length) },
     { to: '/goal', label: 'Blueprint', note: goal.title ? 'set' : 'empty' },
     { to: '/brain-dump', label: 'Drafts', note: visibleBrainDumpCount ? String(visibleBrainDumpCount) : 'cmd-K' },
-    { to: '/habits', label: 'Habits', note: 'soon' },
+    { to: '/habits', label: 'Habits', note: String(habits.filter((habit) => habit.status !== 'archived').length) },
     { to: '/calendar', label: 'Calendar', note: 'soon' },
     { to: '/review', label: 'Review', note: 'soon' },
   ];

@@ -1,4 +1,4 @@
-import type { BrainDumpItem, FrictionHistory, Goal, Phase, ResumeState, Task } from '../types';
+import type { BrainDumpItem, FrictionHistory, Goal, Habit, Phase, ResumeState, Task } from '../types';
 
 export const phases: Phase[] = [
   {
@@ -44,5 +44,7 @@ export const goal: Goal = {
 export const frictionHistory: FrictionHistory = [];
 
 export const brainDumpItems: BrainDumpItem[] = [];
+
+export const habits: Habit[] = [];
 
 export const resumeState: ResumeState | null = null;

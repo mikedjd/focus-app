@@ -6,6 +6,10 @@ export type BrainDumpStatus = 'pile' | 'task' | 'parked' | 'deleted';
 
 export type TaskStatus = 'idle' | 'tending' | 'done' | 'parked';
 
+export type HabitCadence = 'daily' | 'weekdays' | 'custom';
+
+export type HabitStatus = 'active' | 'paused' | 'archived';
+
 export interface Phase {
   id: PhaseId;
   label: string;
@@ -83,4 +87,21 @@ export interface GoalProgress {
   currentMilestoneId: string;
   completedMilestones: number;
   totalMilestones: number;
+}
+
+export interface Habit {
+  id: string;
+  title: string;
+  identity: string;
+  tinyAction: string;
+  anchor: string;
+  location: string;
+  frictionCut: string;
+  celebration: string;
+  cadence: HabitCadence;
+  targetPerWeek: number;
+  status: HabitStatus;
+  createdAt: string;
+  completions: string[];
+  skips: string[];
 }
