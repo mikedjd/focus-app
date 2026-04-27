@@ -29,6 +29,9 @@ export function PhaseColumns() {
             </div>
 
             <div className="space-y-3">
+              {phaseTasks.length === 0 ? (
+                <p className="py-2 text-[13px] italic text-ink-muted">Nothing planted here yet.</p>
+              ) : null}
               {phaseTasks.map((task) => (
                 <button
                   key={task.id}

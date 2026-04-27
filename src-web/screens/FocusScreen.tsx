@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { formatSeconds } from '../lib/format';
+import { DEFAULT_TASK_XP } from '../lib/xp';
 import { useGardenStore } from '../store/useGardenStore';
 
 function SunTimer({ elapsedSeconds, cyclesDone, totalCycles }: { elapsedSeconds: number; cyclesDone: number; totalCycles: number }) {
@@ -66,8 +67,8 @@ export function FocusScreen() {
   const startSession = useGardenStore((state) => state.startSession);
   const completeCurrentTask = useGardenStore((state) => state.completeCurrentTask);
   const stopSession = useGardenStore((state) => state.stopSession);
-  const task = tasks.find((candidate) => candidate.id === currentTaskId) ?? tasks[0];
-  const [localElapsed, setLocalElapsed] = useState(activeSession?.elapsedSeconds ?? task.cyclesDone * 25 * 60);
+  const task = tasks.find((candidate) => candidate.id === currentTaskId) ?? tasks[0] ?? null;
+  const [localElapsed, setLocalElapsed] = useState(activeSession?.elapsedSeconds ?? (task?.cyclesDone ?? 0) * 25 * 60);
 
   useEffect(() => {
     if (sessionState !== 'running') return;
@@ -80,12 +81,31 @@ export function FocusScreen() {
   }, [sessionState]);
 
   useEffect(() => {
-    if (!activeSession && sessionState === 'idle') {
+    if (task && !activeSession && sessionState === 'idle') {
       startSession(task.id);
     }
-  }, [activeSession, sessionState, startSession, task.id]);
+  }, [activeSession, sessionState, startSession, task]);
 
   const elapsedLabel = useMemo(() => formatSeconds(localElapsed), [localElapsed]);
+
+  if (!task) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-gradient-to-b from-focus-top to-focus-bottom px-7 py-7 text-paper">
+        <div className="max-w-xl text-center">
+          <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-sienna-soft">
+            no row yet
+          </p>
+          <h1 className="mt-4 font-display text-[56px] leading-none">Plant one row first.</h1>
+          <p className="mt-4 text-[15px] leading-7 text-paper/70">
+            The focus room opens once there is a real task to tend.
+          </p>
+          <Button className="mt-7" onClick={() => navigate('/')}>
+            Back to Today
+          </Button>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-focus-top to-focus-bottom px-7 py-7 text-paper md:px-12">
@@ -108,7 +128,7 @@ export function FocusScreen() {
       <section className="mx-auto grid min-h-[calc(100vh-96px)] max-w-[1280px] items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_520px]">
         <div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-sienna-soft">
-            ✦ The one row · cycle {Math.min(task.cyclesDone + 1, task.totalCycles)} of {task.totalCycles}
+            ✦ The one row · cycle {Math.min(task.cyclesDone + 1, task.totalCycles)} of {task.totalCycles} · {task.xpValue ?? DEFAULT_TASK_XP} XP
           </p>
           <h1 className="mt-4 max-w-3xl font-display text-[52px] leading-[0.98] tracking-[-0.02em] md:text-[64px]">
             {task.title}{' '}

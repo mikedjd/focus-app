@@ -1,17 +1,21 @@
 import { NavLink } from 'react-router-dom';
 import { useGardenStore } from '../store/useGardenStore';
 
-const navItems = [
-  { to: '/', label: 'Today', note: '5' },
-  { to: '/goal', label: 'Goal', note: '1/3' },
-  { to: '/brain-dump', label: 'Brain dump', note: 'cmd-K' },
-  { to: '/habits', label: 'Habits', note: 'due' },
-  { to: '/calendar', label: 'Calendar', note: 'soon' },
-  { to: '/review', label: 'Review', note: 'Fri' },
-];
-
 export function Sidebar() {
   const goal = useGardenStore((state) => state.goal);
+  const tasks = useGardenStore((state) => state.tasks);
+  const brainDumpItems = useGardenStore((state) => state.brainDumpItems);
+  const resetAppData = useGardenStore((state) => state.resetAppData);
+  const visibleBrainDumpCount = brainDumpItems.filter((item) => item.status === 'pile').length;
+
+  const navItems = [
+    { to: '/', label: 'Today', note: String(tasks.filter((task) => task.status !== 'done').length) },
+    { to: '/goal', label: 'Goal', note: goal.title ? 'set' : 'empty' },
+    { to: '/brain-dump', label: 'Brain dump', note: visibleBrainDumpCount ? String(visibleBrainDumpCount) : 'cmd-K' },
+    { to: '/habits', label: 'Habits', note: 'soon' },
+    { to: '/calendar', label: 'Calendar', note: 'soon' },
+    { to: '/review', label: 'Review', note: 'soon' },
+  ];
 
   return (
     <aside className="sticky top-0 flex h-screen w-[244px] shrink-0 flex-col justify-between border-r border-rule bg-bg px-[22px] py-8">
@@ -46,10 +50,22 @@ export function Sidebar() {
         <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-ink-muted">
           The patch
         </p>
-        <h2 className="font-display text-[22px] leading-tight text-ink">{goal.title}</h2>
+        <h2 className="font-display text-[22px] leading-tight text-ink">
+          {goal.title || 'No patch planted yet'}
+        </h2>
         <p className="mt-3 text-[12px] leading-5 text-ink-soft">
-          sown {goal.sownDaysAgo} days ago · harvest by {goal.harvestBy}
+          {goal.title ? `sown ${goal.sownDaysAgo} days ago · harvest by ${goal.harvestBy || 'not set'}` : 'Add your real goal on the Goal screen.'}
         </p>
+        <p className="mt-3 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-sienna">
+          {(goal.xpTotal ?? 0)} / {(goal.xpTarget ?? 300)} XP
+        </p>
+        <button
+          type="button"
+          onClick={resetAppData}
+          className="mt-4 rounded-full border border-rule px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted transition hover:border-sienna hover:text-sienna"
+        >
+          clear data
+        </button>
       </section>
     </aside>
   );

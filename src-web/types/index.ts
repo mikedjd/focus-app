@@ -23,6 +23,7 @@ export interface Task {
   cyclesDone: number;
   totalCycles: number;
   estimateMinutes: number;
+  xpValue: number;
   status: TaskStatus;
   lastNote?: string;
 }
@@ -48,6 +49,10 @@ export interface Goal {
   emotionalReason: string;
   costOfDrift: string;
   milestones: Milestone[];
+  xpTotal: number;
+  xpTarget: number;
+  buildHealth: number;
+  buildStage: 1 | 2 | 3 | 4 | 5;
 }
 
 export interface Session {

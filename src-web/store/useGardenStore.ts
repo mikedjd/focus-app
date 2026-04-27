@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import {
   brainDumpItems as seedBrainDumpItems,
   frictionHistory as seedFrictionHistory,
@@ -8,6 +9,7 @@ import {
   tasks as seedTasks,
 } from '../lib/mockData';
 import { deterministicTilt, nowCaughtLabel } from '../lib/format';
+import { DEFAULT_TASK_XP, DEFAULT_XP_TARGET, calculateBuildStage } from '../lib/xp';
 import type {
   BrainDumpItem,
   FrictionHistory,
@@ -25,7 +27,7 @@ interface GardenState {
   phases: Phase[];
   goal: Goal;
   tasks: Task[];
-  currentTaskId: string;
+  currentTaskId: string | null;
   activePhase: PhaseId;
   sessionState: SessionState;
   activeSession: Session | null;
@@ -33,6 +35,8 @@ interface GardenState {
   brainDumpItems: BrainDumpItem[];
   goalProgress: GoalProgress;
   resumeState: ResumeState | null;
+  updateGoal: (input: GoalInput) => void;
+  addTask: (input: TaskInput) => void;
   setActivePhase: (phaseId: PhaseId) => void;
   setCurrentTask: (taskId: string) => void;
   startSession: (taskId?: string) => void;
@@ -44,26 +48,107 @@ interface GardenState {
   convertBrainDumpToTask: (itemId: string) => void;
   parkBrainDumpItem: (itemId: string) => void;
   deleteBrainDumpItem: (itemId: string) => void;
+  resetAppData: () => void;
 }
 
-const upNextMilestone = goal.milestones.find((milestone) => milestone.state === 'up-next');
+export interface GoalInput {
+  title: string;
+  target: string;
+  harvestBy: string;
+  whyQuote: string;
+  practicalReason: string;
+  emotionalReason: string;
+  costOfDrift: string;
+  xpTarget: number;
+}
 
-export const useGardenStore = create<GardenState>((set, get) => ({
+export interface TaskInput {
+  title: string;
+  description: string;
+  why: string;
+  phaseId: PhaseId;
+  totalCycles: number;
+  estimateMinutes: number;
+  xpValue: number;
+}
+
+function createGoalProgress(sourceGoal: Goal): GoalProgress {
+  const upNextMilestone = sourceGoal.milestones.find((milestone) => milestone.state === 'up-next');
+
+  return {
+    currentMilestoneId: upNextMilestone?.id ?? sourceGoal.milestones[0]?.id ?? '',
+    completedMilestones: sourceGoal.milestones.filter((milestone) => milestone.state === 'done').length,
+    totalMilestones: sourceGoal.milestones.length,
+  };
+}
+
+const initialGoalProgress = createGoalProgress(goal);
+
+export const useGardenStore = create<GardenState>()(
+  persist((set, get) => ({
   phases,
   goal,
   tasks: seedTasks,
-  currentTaskId: seedTasks[0].id,
+  currentTaskId: seedTasks[0]?.id ?? null,
   activePhase: 'deep',
   sessionState: 'idle',
   activeSession: null,
   frictionHistory: seedFrictionHistory,
   brainDumpItems: seedBrainDumpItems,
-  goalProgress: {
-    currentMilestoneId: upNextMilestone?.id ?? goal.milestones[0].id,
-    completedMilestones: goal.milestones.filter((milestone) => milestone.state === 'done').length,
-    totalMilestones: goal.milestones.length,
-  },
+  goalProgress: initialGoalProgress,
   resumeState: seedResumeState,
+  updateGoal: (input) => {
+    const today = new Date();
+    const startedAt = today.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const nextGoal: Goal = {
+      id: `goal-${Date.now()}`,
+      title: input.title.trim(),
+      target: input.target.trim(),
+      harvestBy: input.harvestBy.trim(),
+      startedAt,
+      sownDaysAgo: 0,
+      whyQuote: input.whyQuote.trim(),
+      practicalReason: input.practicalReason.trim(),
+      emotionalReason: input.emotionalReason.trim(),
+      costOfDrift: input.costOfDrift.trim(),
+      xpTotal: 0,
+      xpTarget: input.xpTarget || DEFAULT_XP_TARGET,
+      buildHealth: 100,
+      buildStage: 1,
+      milestones: [
+        { id: 'm1', label: 'First clear milestone', date: startedAt, state: 'up-next' },
+        { id: 'm2', label: 'Second milestone', date: '', state: 'future' },
+        { id: 'm3', label: 'Third milestone', date: '', state: 'future' },
+        { id: 'm4', label: 'Fourth milestone', date: '', state: 'future' },
+        { id: 'm5', label: 'Harvest', date: input.harvestBy.trim(), state: 'future' },
+      ],
+    };
+
+    set({
+      goal: nextGoal,
+      goalProgress: createGoalProgress(nextGoal),
+    });
+  },
+  addTask: (input) => {
+    const task: Task = {
+      id: `task-${Date.now()}`,
+      title: input.title.trim(),
+      description: input.description.trim(),
+      why: input.why.trim(),
+      phaseId: input.phaseId,
+      cyclesDone: 0,
+      totalCycles: input.totalCycles,
+      estimateMinutes: input.estimateMinutes,
+      xpValue: input.xpValue || DEFAULT_TASK_XP,
+      status: 'idle',
+    };
+
+    set((state) => ({
+      tasks: [...state.tasks, task],
+      currentTaskId: state.currentTaskId ?? task.id,
+      activePhase: state.currentTaskId ? state.activePhase : task.phaseId,
+    }));
+  },
   setActivePhase: (phaseId) => set({ activePhase: phaseId }),
   setCurrentTask: (taskId) => {
     const task = get().tasks.find((candidate) => candidate.id === taskId);
@@ -76,6 +161,8 @@ export const useGardenStore = create<GardenState>((set, get) => ({
   },
   startSession: (taskId) => {
     const selectedTaskId = taskId ?? get().currentTaskId;
+    if (!selectedTaskId) return;
+
     const task = get().tasks.find((candidate) => candidate.id === selectedTaskId);
     if (!task) return;
 
@@ -111,20 +198,35 @@ export const useGardenStore = create<GardenState>((set, get) => ({
     set((state) => ({
       sessionState: 'idle',
       activeSession: null,
-      resumeState: {
+      resumeState: state.currentTaskId ? {
         taskId: state.currentTaskId,
         note: state.tasks.find((task) => task.id === state.currentTaskId)?.lastNote ?? 'Step away on purpose.',
         timestampLabel: 'just now',
-      },
+      } : null,
     })),
   completeCurrentTask: () => {
     const currentTaskId = get().currentTaskId;
+    if (!currentTaskId) return;
+
+    const completedTask = get().tasks.find((task) => task.id === currentTaskId);
+    if (!completedTask) return;
+
     const todayFloor = Math.max(1, get().frictionHistory.at(-1) ?? 0);
 
     set((state) => ({
       sessionState: 'complete',
       activeSession: state.activeSession ? { ...state.activeSession, state: 'complete' } : null,
       frictionHistory: [...state.frictionHistory.slice(1), todayFloor + 1],
+      goal: {
+        ...state.goal,
+        xpTotal: (state.goal.xpTotal ?? 0) + (completedTask.xpValue ?? DEFAULT_TASK_XP),
+        xpTarget: state.goal.xpTarget ?? DEFAULT_XP_TARGET,
+        buildHealth: Math.min(100, (state.goal.buildHealth ?? 100) + 1),
+        buildStage: calculateBuildStage(
+          (state.goal.xpTotal ?? 0) + (completedTask.xpValue ?? DEFAULT_TASK_XP),
+          state.goal.xpTarget ?? DEFAULT_XP_TARGET,
+        ),
+      },
       tasks: state.tasks.map((task) =>
         task.id === currentTaskId
           ? { ...task, status: 'done', cyclesDone: task.totalCycles }
@@ -167,6 +269,7 @@ export const useGardenStore = create<GardenState>((set, get) => ({
         cyclesDone: 0,
         totalCycles: 1,
         estimateMinutes: 25,
+        xpValue: DEFAULT_TASK_XP,
         status: 'idle',
       };
 
@@ -189,4 +292,30 @@ export const useGardenStore = create<GardenState>((set, get) => ({
         item.id === itemId ? { ...item, status: 'deleted' } : item,
       ),
     })),
+  resetAppData: () =>
+    set({
+      goal,
+      tasks: [],
+      currentTaskId: null,
+      activePhase: 'deep',
+      sessionState: 'idle',
+      activeSession: null,
+      frictionHistory: [],
+      brainDumpItems: [],
+      goalProgress: initialGoalProgress,
+      resumeState: null,
+    }),
+}), {
+  name: 'garden-focus-app-v1',
+  partialize: (state) => ({
+    goal: state.goal,
+    tasks: state.tasks,
+    currentTaskId: state.currentTaskId,
+    activePhase: state.activePhase,
+    frictionHistory: state.frictionHistory,
+    brainDumpItems: state.brainDumpItems,
+    goalProgress: state.goalProgress,
+    resumeState: state.resumeState,
+  }),
+  version: 1,
 }));

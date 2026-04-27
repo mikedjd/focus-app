@@ -5,6 +5,22 @@ interface FrictionChartProps {
 }
 
 export function FrictionChart({ history }: FrictionChartProps) {
+  if (history.length < 2) {
+    return (
+      <section className="rounded-[20px] border border-rule bg-paper p-7">
+        <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-leaf">
+          ✦ Friction floor
+        </p>
+        <div className="mt-4 rounded-2xl border border-dashed border-rule bg-bg p-8">
+          <p className="font-display text-[28px] italic text-ink">No climb yet.</p>
+          <p className="mt-2 max-w-xl text-[14px] leading-6 text-ink-soft">
+            Finish a focus row and the floor starts tracking here.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
   const width = 1180;
   const height = 200;
   const max = Math.max(...history, 60);

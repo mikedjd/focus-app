@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from './Button';
 import { useGardenStore } from '../store/useGardenStore';
 import type { Task } from '../types';
+import { DEFAULT_TASK_XP } from '../lib/xp';
 
 interface OneRowCardProps {
   task: Task;
@@ -72,6 +73,7 @@ export function OneRowCard({ task }: OneRowCardProps) {
               cycle {task.cyclesDone + 1} of {task.totalCycles}
             </div>
             <div>{task.estimateMinutes} min floor</div>
+            <div>{task.xpValue ?? DEFAULT_TASK_XP} XP</div>
           </div>
         </div>
       </div>
